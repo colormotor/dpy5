@@ -29,13 +29,19 @@ c.stroke_weight(2.0)
 c.polyline([[50, 50], [200, 50], [200, 200], [50, 200]], close=True)
 
 # Render the scene (differentiable, img contains the resulting tensor)
-img = canvas.render()
+img = c.render() # Returns tensor
 c.get_image()
 ``` 
+The corresponding DiffVG scene is cleared when =background= is called and then constructed as each drawing method is called. Calling =render= at the end rasterizes the scene while allowing gradient propagation to any parameter used in the drawing procedures.
+
+Optimizing a scene involves re-drawing the scene at each optimization step and eventually using the otuput of =render= to compute losses in image space.
 
 ### Optimization example
-The API allows to easily add variables that can be optimized using the `var(value, group_name)` method. Calling this will convert the input to a tensor with gradients enabled. Providing a group name will cache the variable inside the `DiffCanvas` instance so it can be retrieved using the `get_vars(group_name)~ method and modifed by an optimizer. Note that this caching method saves typing, but it expects the drawing order to remain unchanged for each step of the optimization. As an example:
+While it is possible to explictly pass in tensors to the =DiffCanvas= drawing methods and explictly optimizing these, the API allows you to do so more concisely by using the =c.var(value, group_name)= syntax. This method returns a PyTorch tensor with =requires_grad=True=. Providing a =group_name= caches the tensor so it can be retrieved with =c.get_vars(group_name)= and passed to an optimizer.
 
+> Note: while this caching method saves typing, it expects the drawing order to remain unchanged for each step of the optimization. 
+
+Here is a simple example of an optimization loop that adapts a series of curves to minimize the L1 error with a target image:
 ``` python
 import os
 import torch
@@ -125,7 +131,7 @@ canvas = DiffCanvas(width, height, device=None)
 canvas.render(prefiltering=False, num_samples=2, seed=0, sdf=False)
 ```
 
-- `prefiltering`: if `True`, uses an anti‑aliasing prefilter.
+- `prefiltering`: if `True`, uses an anti‑aliasing prefilter. Produces crisper lines, but does not support variable width strokes and produces artefacts in some cases.
 - `num_samples`: multisampling level.
 - `sdf`: if `True`, outputs a signed distance field.
 
@@ -160,6 +166,12 @@ After rendering, the result is stored in `canvas.img`. Retrieve it as a PIL imag
 | `multibezier(points, close=False)` | Draw a sequence of cubic Bézier segments. |
 | `curve(points, close=False)` | Draw a smooth cardinal spline through the given points. |
 | `shape(obj, close=False)` | Draw a `Shape` object or a list of polylines. |
+| =rect(x, y, w, h, radius=None)= or =rectangle(...)= | Draw a rectangle. Optional =radius= for rounded corners. |
+| =square(x, y, size)= | Draw a square. |
+| =ellipse(x, y, w, h)= | Draw an ellipse. |
+| =circle(x, y, r)= | Draw a circle. |
+| =triangle(a, b, c)= | Draw a triangle from three points. |
+| =quad(a, b, c, d)= | Draw a quadrilateral from four points. |
 
 ### Complex Shapes
 
