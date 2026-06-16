@@ -931,7 +931,8 @@ class DiffCanvas:
             img = img[:, :, :3]
 
         self.img = img
-        
+        return img
+    
     def get_image(self):
         assert self.img is not None
         img = self.img.detach().cpu().numpy()
