@@ -5,7 +5,7 @@ import numpy as np
 from collections import defaultdict
 from contextlib import contextmanager
 import pydiffvg
-import copy
+import copy, time
 from PIL import Image
 
 def make_mat(M, device, dtype):
@@ -208,10 +208,12 @@ class DiffCanvas:
 
     def _vec(self, *args):
         return make_vec(*args, device=self.device, dtype=self.dtype)
-    
-    def _to(self, v):
-        return torch.as_tensor(v).to(self.dtype).to(self.device)
 
+    def to(self, v):
+        '''Converts a value or tensor to the appropriate dtype and device'''
+        return torch.as_tensor(v).to(self.dtype).to(self.device)
+    _to = to
+    
     def translate(self, *args):
         if len(args) == 1:
             p = self._to(args[0])
@@ -523,9 +525,9 @@ class DiffCanvas:
         To close the polyline set the named =close= argument to =True=, e.g. =c.polyline(points, close=True)=.
         """
         if len(args) == 1:
-            points = args[0]
+            points = self._to(args[0])
         elif len(args) == 2:
-            points = torch.vstack(args).T
+            points = torch.vstack([self._to(v) for v in args]).T
         else:
             raise ValueError("Wrong number of arguments")
         self.begin_contour()
@@ -550,9 +552,9 @@ class DiffCanvas:
         To close the curve set the named =close= argument to =True=, e.g. =c.multibezier(points, close=True)=.
         """
         if len(args) == 1:
-            points = args[0]
+            points = self._to(args[0])
         elif len(args) == 2:
-            points = torch.vstack(args).T
+            points = torch.vstack([self._to(v) for v in args]).T
         else:
             raise ValueError("Wrong number of arguments")
         self.begin_contour()
@@ -573,9 +575,9 @@ class DiffCanvas:
         To close the curve set the named =close= argument to =True=, e.g. =c.curve(points, close=True)=.
         """
         if len(args) == 1:
-            points = args[0]
+            points = self._to(args[0])
         elif len(args) == 2:
-            points = torch.vstack(args).T
+            points = torch.vstack([self._to(v) for v in args]).T
         else:
             raise ValueError("Wrong number of arguments")
         self.begin_contour()
@@ -670,14 +672,14 @@ class DiffCanvas:
         w, h = size
 
         if radius is None:
-            #return
-        
-            self.polyline(self._mat([
+            pts = self._mat([
                 [x, y],
                 [x + w, y],
                 [x + w, y + h],
                 [x, y + h],
-            ]), close=True)
+            ])
+            
+            self.polyline(pts, close=True)
         else:
             r = torch.min(self._to(radius), torch.min(w, h) / 2)
             k = self._to(0.5522847498)
@@ -908,19 +910,21 @@ class DiffCanvas:
         if not self.primitives:
             self.img = bg
             return self.img
-        
-        scene_args = pydiffvg.RenderFunction.serialize_scene(w, h,
-                                                             self.primitives,
-                                                             self.groups,
-                                                             use_prefiltering=prefiltering,
-                                                             output_type=pydiffvg.OutputType.sdf if sdf
-                                                             else pydiffvg.OutputType.color)
-        try:
-            img = pydiffvg.RenderFunction.apply(w, h, num_samples, num_samples, seed, None, *scene_args)
-        except RuntimeError as e:
-            print("RUNTIME ERROR IN RENDER")
-            print("Possibly wrong dtype in geometry, needs to be float32")
-            raise(e)
+
+        with perf_timer('Serialize scene', False):
+            scene_args = pydiffvg.RenderFunction.serialize_scene(w, h,
+                                                                self.primitives,
+                                                                self.groups,
+                                                                use_prefiltering=prefiltering,
+                                                                output_type=pydiffvg.OutputType.sdf if sdf
+                                                                else pydiffvg.OutputType.color)
+        with perf_timer('Render', False):
+            try:
+                img = pydiffvg.RenderFunction.apply(w, h, num_samples, num_samples, seed, None, *scene_args)
+            except RuntimeError as e:
+                print("RUNTIME ERROR IN RENDER")
+                print("Possibly wrong dtype in geometry, needs to be float32")
+                raise(e)
 
         if self._bg is not None:
             img = img[:, :, 3:4] * img[:, :, :3] + bg * (1 - img[:, :, 3:4])
@@ -998,7 +1002,7 @@ class DiffCanvas:
 
 
 class CanvasOptimizer:
-    def __init__(self, w, h):
+    def __init__(self, w, h, verbose=False):
         self.c = DiffCanvas(w, h)
         self.optimizers = []
         self.schedulers = []
@@ -1006,6 +1010,7 @@ class CanvasOptimizer:
         self.running = False
         self.epoch = 0
         self.num_opt_steps = 0
+        self.verbose = verbose
         
     ######################################
     # Functions for user to override
@@ -1034,7 +1039,7 @@ class CanvasOptimizer:
     
     ######################################
     # Built in
-
+    
     def step(self):
         # Peform an optimization step if optimizing
         if not self.running:
@@ -1356,3 +1361,20 @@ def default_device():
         # DiffVG does not work well with ARM
         return torch.device('cpu')
         
+
+class perf_timer:
+    def __init__(self, name='', verbose=True):
+        #if name and verbose:
+        #    print(name)
+        self.name = name
+        self.verbose = verbose
+        self.elapsed = 0
+        
+    def __enter__(self):
+        self.t = time.perf_counter()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.elapsed = (time.perf_counter() - self.t)*1000
+        if self.name and self.verbose:
+            print('%s: elapsed time %.3f milliseconds'%(self.name, self.elapsed))

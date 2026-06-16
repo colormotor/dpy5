@@ -60,7 +60,7 @@ plt.subplot(133)
 plt.title('optimizied'); plt.axis('off')
 plt.imshow(c.get_image())
 plt.tight_layout()
-plt.savefig('image_example_01.png')
+plt.savefig('image_example_02.png')
 plt.show()
 
 
