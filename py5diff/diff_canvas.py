@@ -70,6 +70,16 @@ def draw_states_properties(*names):
 
 
 class DiffCanvas:
+    """
+    A differentiable 2D vector graphics canvas based on DiffVG, using a Processing-like syntax.
+    It provides an imperative drawing API similar to Processing/p5
+    (e.g. `background`, `fill`, `stroke`, `push`, `pop`, `translate`, `rotate`,
+    `scale`, `line`, `rect`, `ellipse`, `begin_shape` / `end_shape`) while
+    building a scene using DiffVG.  All geometric and style parameters
+    are PyTorch tensors, so gradients flow through `render()` and the resulting
+    image can be optimized with gradient descent.
+    """
+
     def __init__(self, width, height, device=None):
         self.vars = defaultdict(list)
         if device is None:
@@ -102,6 +112,9 @@ class DiffCanvas:
         # Gives corresponding indices in primitive list
         self.shape_to_inds = {}
         self.img = None
+
+        # Reset counter for auto var id
+        self._var_counters = defaultdict(int) 
         
     def begin(self):
         @contextmanager
@@ -954,13 +967,15 @@ class DiffCanvas:
         v.requires_grad = grad
         if group_name:
             if id is None:
-                if group_name in self._vars:
-                    id = len(self._vars[group_name])
-                else:
-                    id = 0
+                # Automatically get id for each draw sequence
+                # Simply the count for a given group
+                id = self._var_counters[group_name]
+                self._var_counters[group_name] += 1
+                
             var_id = self._var_id(group_name, id)
             if var_id in self._id_to_var:
                 return self._id_to_var[var_id]
+            
             self._vars[group_name].append(v)
             self._id_to_var[var_id] = v
             
@@ -973,6 +988,7 @@ class DiffCanvas:
 
     def clear_vars(self):
         self._vars = defaultdict(list)
+        self._var_counters = defaultdict(int) # Use for auto id
         self._id_to_var = {}
 
     def _var_id(self, name, id):
