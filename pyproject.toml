@@ -1,0 +1,29 @@
+# PyPi steps
+# python -m build
+# twine upload dist/*
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "py5diff"
+version = "0.0.1"
+description = "Processing like API for differentiable vector graphics"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Daniel Berio"}
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "torch"
+]
+
+[project.urls]
+Homepage = "https://github.com/colormotor/py5diff"
+Issues = "https://github.com/colormotor/py5diff/issues"
+
+[tool.setuptools]
+packages = ["py5diff"]
