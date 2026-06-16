@@ -11,11 +11,11 @@ from PIL import Image
 def make_mat(M, device, dtype):
     return torch.vstack([torch.stack([torch.as_tensor(v) for v in row]) for row in M]).to(dtype).to(device)
 
-def make_vec(vec, device, dtype):
-    return torch.stack([torch.as_tensor(v) for v in vec])
+def make_vec(*args, device, dtype):
+    return torch.stack([torch.as_tensor(v) for v in args]).to(dtype).to(device)
 
 def is_number(x):
-    return isinstance(x, numbers.Number)
+    return isinstance(x, numbers.Number) or (isinstance(x, torch.Tensor) and x.numel() == 1)
     
 class CanvasState:
     ''' Keeps track of styles etc to enable push/pop'''
@@ -193,8 +193,8 @@ class DiffCanvas:
     def _mat(self, M):
         return make_mat(M, self.device, self.dtype)
 
-    def _vec(self, v):
-        return make_vec(v, self.device, self.dtype)
+    def _vec(self, *args):
+        return make_vec(*args, device=self.device, dtype=self.dtype)
     
     def _to(self, v):
         return torch.as_tensor(v).to(self.dtype).to(self.device)
@@ -230,7 +230,7 @@ class DiffCanvas:
         self._transform = self._transform @ M
 
     def identity(self):
-        self._tranform = torch.tensor(np.eye(3), device=self.device, dtype=self.dtype)
+        self._transform = torch.tensor(np.eye(3), device=self.device, dtype=self.dtype)
 
     reset_matrix = identity
     # Automatic see above
@@ -312,17 +312,17 @@ class DiffCanvas:
                 if len(x) == 4:
                     return self._to(x)
                 elif len(x) == 3:
-                    return torch.cat([self._to(x), self._vec([1.0])])
+                    return torch.cat([self._to(x), self._vec(1.0)])
                 elif len(x) == 2:
-                    return self._vec([x[0], x[0], x[0], x[1]])
+                    return self._vec(x[0], x[0], x[0], x[1])
                 else:
-                    return self._vec([x[0], x[0], x[0], 1.0])
+                    return self._vec(x[0], x[0], x[0], 1.0)
             else:
-                return self._vec([args[0], args[0], args[0], 1.0])
+                return self._vec(args[0], args[0], args[0], 1.0)
         elif len(args) == 2:
-            return self._vec([args[0], args[0], args[0], args[1]])
+            return self._vec(args[0], args[0], args[0], args[1])
         elif len(args) == 3:
-            return self._vec([args[0], args[1], args[2], 1.0])
+            return self._vec(args[0], args[1], args[2], 1.0)
         elif len(args) == 4:
             return self._vec(args)
         raise ValueError("Invalid arg combination")
@@ -375,7 +375,7 @@ class DiffCanvas:
         if args[0] is None:
             self.cur_stroke = None
         else:
-            self.cur_stroke = self._get_color(args)
+            self.cur_stroke = self._get_color(*args)
 
     def stroke_weight(self, w):
         """Set the line width
@@ -519,6 +519,10 @@ class DiffCanvas:
         self.cur_shape._polyline(points, close)
         self.end_contour(close)
 
+    def polygon(self, points):
+        """Draw a closed polygon from a sequence of (x,y) points."""
+        self.polyline(points, close=True)
+
     def multibezier(self, *args, close=False):
         """
         Draw a sequence of connected cubic Bézier curves.
@@ -570,7 +574,7 @@ class DiffCanvas:
         For lists, each polyline becomes one contour (open or closed)."""
         
         if isinstance(obj, Shape):
-            if obj in self.shape_to_inds[obj]:
+            if obj in self.shape_to_inds:
                 # Create an instance if we are reusing the shape obj
                 inds = self.shape_to_inds[obj]
                 self._instance_primitives(inds)
@@ -591,6 +595,233 @@ class DiffCanvas:
         tmp_shape.end_shape()
         self._build_shape(tmp_shape)
 
+    def _as_point(self, p):
+        """Convert a 2D point to a differentiable tensor while preserving grads."""
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            return self._vec(p[0], p[1])
+        return self._to(p)
+
+
+    def _as_size(self, s):
+        """Convert a size (scalar or [w,h]) to a differentiable 2D tensor."""
+        if isinstance(s, (list, tuple)) and len(s) == 2:
+            return self._vec(s[0], s[1])
+        t = self._to(s)
+        if t.numel() == 1:
+            return self._vec(t, t)
+        return t
+
+
+    def rectangle(self, *args, mode=None, radius=None):
+        """Draw a rectangle. Alias: =rect=.
+
+        Arguments:
+        - =[[x1,y1],[x2,y2]]=            (corners implied)
+        - =[x,y], [w,h]=
+        - =[x,y], w, h=
+        - =x, y, w, h=
+        - any of the above with =radius=r= for rounded corners
+        """
+        if mode is None:
+            mode = self._rect_mode
+        mode = mode.lower()
+
+        # Parse position/size
+        if len(args) == 1:
+            # corners explicitly given
+            p, b = self._to(args[0])
+            size = b - p
+            mode = "corner"
+        elif len(args) == 2: # [x,y], [w,h]
+            p = self._to(args[0])
+            size = self._to(args[1])
+        elif len(args) == 3: # [x,y], w, h
+            p = self._to(args[0])
+            size = self._vec(args[1], args[2])
+        elif len(args) == 4: # x, y, w, h
+            p = self._vec(args[0], args[1])
+            size = self._vec(args[2], args[3])
+        else:
+            raise ValueError("rectangle: wrong number of arguments")
+
+        # Convert modes to top-left corner + full width/height
+        if mode == "corners":
+            size = size - p # Actually size is max corner
+        elif mode == "center":
+            p = p - size/2
+        elif mode == "radius":
+            p = p - size
+            size = size * 2
+
+        x, y = p
+        w, h = size
+
+        s = Shape()
+        s.begin_shape()
+
+        if radius is None:
+            s.polyline(self._mat([
+                [x, y],
+                [x + w, y],
+                [x + w, y + h],
+                [x, y + h],
+            ]), close=True)
+        else:
+            r = torch.min(self._to(radius), torch.min(w, h) / 2)
+            k = self._to(0.5522847498)
+            o = r * (1 - k)
+
+            pts = self._mat([
+                # top-right corner
+                [x + r,       y],
+                [x + w - o,   y],
+                [x + w,       y + o],
+                [x + w,       y + r],
+                # bottom-right corner
+                [x + w,       y + h - o],
+                [x + w - o,   y + h],
+                [x + w - r,   y + h],
+                # bottom-left corner
+                [x + o,       y + h],
+                [x,           y + h - o],
+                [x,           y + h - r],
+                # top-left corner
+                [x,           y + o],
+                [x + o,       y],
+            ])
+            self.multibezier(pts, close=True)
+
+    rect = rectangle
+
+
+    def square(self, *args, mode=None):
+        """Draw a square."""
+        if mode is None:
+            mode = self._rect_mode
+        if mode == "corners":
+            mode = "corner"
+
+        if len(args) == 2:
+            self.rectangle(args[0], self._vec(args[1], args[1]), mode=mode)
+        elif len(args) == 3:
+            self.rectangle(args[0], args[1], args[2], args[2], mode=mode)
+        else:
+            raise ValueError("square: wrong number of arguments")
+
+
+    def quad(self, *args):
+        """Draw a quadrilateral."""
+        if len(args) == 4:
+            points = args
+        elif len(args) == 8:
+            points = [[args[i * 2], args[i * 2 + 1]] for i in range(4)]
+        else:
+            raise ValueError("quad: wrong number of arguments")
+        self.polygon(points)
+
+
+    def triangle(self, *args):
+        """Draw a triangle."""
+        if len(args) == 3:
+            points = args
+        elif len(args) == 6:
+            points = [[args[i * 2], args[i * 2 + 1]] for i in range(3)]
+        else:
+            raise ValueError("triangle: wrong number of arguments")
+        self.polygon(points)
+
+
+    def ellipse(self, *args, mode=None):
+        """Draw an ellipse.
+
+        Arguments:
+        - =[cx,cy], [w,h]=
+        - =[cx,cy], w=              (circle)
+        - =[cx,cy], w, h=
+        - =cx, cy, w=               (circle)
+        - =cx, cy, w, h=
+        """
+        if mode is None:
+            mode = self._ellipse_mode
+        mode = mode.lower()
+
+        if len(args) == 2:
+            center = self._to(args[0])
+            size = self._to(args[1])
+        elif len(args) == 3:
+            if is_number(args[0]):
+                center = self._vec(args[0], args[1])
+                size = self._vec(args[2], args[2])
+                
+            else:
+                center = self._to(args[0])
+                size = self._vec(args[1], args[2])
+        elif len(args) == 4:
+            center = self._vec(args[0], args[1])
+            size = self._vec(args[2], args[3])
+        else:
+            raise ValueError("ellipse: wrong number of arguments")
+
+        if mode == "corners":
+            x1, y1 = center
+            x2, y2 = size
+            center, size = (center + size)/2, torch.abs(size - center)
+        elif mode == "corner":
+            center = center + size/2
+        elif mode == "radius":
+            size *= 2
+
+        cx, cy = center
+        rx, ry = size[0] / 2, size[1] / 2
+
+        # 4-segment cubic Bézier approximation of an ellipse
+        k = self._to(0.5522847498)
+        pts = self._mat([
+            [cx + rx, cy],
+            [cx + rx, cy + ry * k],
+            [cx + rx * k, cy + ry],
+            [cx, cy + ry],
+            [cx - rx * k, cy + ry],
+            [cx - rx, cy + ry * k],
+            [cx - rx, cy],
+            [cx - rx, cy - ry * k],
+            [cx - rx * k, cy - ry],
+            [cx, cy - ry],
+            [cx + rx * k, cy - ry],
+            [cx + rx, cy - ry * k],
+        ])
+
+        self.multibezier(pts, close=True)
+        
+
+    def circle(self, *args, mode=None):
+        """Draw a circle.
+
+        Arguments:
+        - =[cx,cy], r=
+        - =cx, cy, r=
+        """
+        if mode is None:
+            mode = self._ellipse_mode
+        mode = mode.lower()
+
+        if len(args) == 2:
+            center = self._to(args[0])
+            size = self._to(args[1])
+        elif len(args) == 3:
+            center = self._vec(args[0], args[1])
+            size = self._to(args[2])
+        else:
+            raise ValueError("circle: wrong number of arguments")
+
+        if mode == "radius":
+            size = size*2
+        
+        if mode == "corner":
+            center = center + size
+            
+        self.ellipse(center, size, mode="center")
+
     ###############################################
     # Scene management
 
@@ -600,7 +831,8 @@ class DiffCanvas:
         self.primitives += primitives
         shape_ids = list(range(ind, ind+len(primitives)))
         self._instance_primitives(shape_ids)
-
+        return shape_ids
+    
     def _instance_primitives(self, shape_ids):
         ''' Create groups for given primitive indices'''
         fill_color = None
@@ -646,7 +878,9 @@ class DiffCanvas:
     
 
     # Shape building (same as parent, but end_shape appends)
-    def render(self, prefiltering=False, num_samples=2, seed=0, sdf=False):       
+    def render(self, prefiltering=False, num_samples=2, seed=0, sdf=False):
+        self.building = False
+        
         if prefiltering:
             num_samples = 1
 
@@ -661,7 +895,7 @@ class DiffCanvas:
 
         if not self.primitives:
             self.img = bg
-            return
+            return self.img
         
         scene_args = pydiffvg.RenderFunction.serialize_scene(w, h,
                                                              self.primitives,
@@ -761,8 +995,10 @@ class Shape:
     def __init__(self, tension=0.5):
         self.tension = tension
         self.contours = []           # list of contour command lists
+        self._built = False
         self.reset()
         
+    
     def reset(self):
         self._contour = [] # list of commands for the contour being built
         self._num_ctrl = []
@@ -770,9 +1006,13 @@ class Shape:
         self._spline_start = None    # first point of the current spline (move-to)
         self._shape_active = False         # True between begin_shape()/end_shape()
 
-    # --- Public construction methods (mirror PShape) ---
+    def _ensure_mutable(self):
+        if self._built:
+            raise ValueError("Cannot add contours to a shape that has been built, clone it instead")
+        
     def begin_shape(self):
         """Start building the shape. Clears any previous geometry."""
+        self._ensure_mutable()
         self.reset()
         self._shape_active = True
         self.contours = []
@@ -782,20 +1022,25 @@ class Shape:
         Finish building the shape.
         If close is True, the last contour is closed before finalising.
         """
+        self._ensure_mutable()
         if self._shape_active:
-            if self._current or self._curve_points:
+            if self._contour or self._curve_points:
                 self.end_contour(close)
             self._shape_active = False
 
     def begin_contour(self):
         """Start a new contour. Must be called after begin_shape()."""
+        self._ensure_mutable()
         if not self._shape_active:
             raise RuntimeError("begin_shape() must be called before begin_contour()")
         self.reset()
         
     def end_contour(self, close=False):
         """Finish the current contour. If close=True, the contour is closed."""
+        self._ensure_mutable()
         self._flush_spline(close=close)
+        if not self._contour:
+            return
         pts = torch.vstack(self._contour)
         n_ctrl = torch.tensor(self._num_ctrl, dtype=torch.int32)
         self.contours.append((pts, n_ctrl, close))
@@ -803,6 +1048,7 @@ class Shape:
         
     def vertex(self, *args):
         """Add a straight vertex ."""
+        self._ensure_mutable()
         if len(args) > 1:
             x = torch.stack([torch.as_tensor(v) for v in args])
         else:
@@ -812,8 +1058,9 @@ class Shape:
         self._contour.append(x)
         self._num_ctrl += [1] 
         
-    def curve_vertex(self, x, y=None):
+    def curve_vertex(self, *args):
         """Add a curved vertex (Catmull Rom spline)."""
+        self._ensure_mutable()
         if len(args) > 1:
             x = torch.stack([torch.as_tensor(v) for v in args])
         else:
@@ -829,7 +1076,16 @@ class Shape:
 
     def bezier_vertex(self, *args):
         """Add a cubic Bézier vertex; three control points."""
-        
+        self._ensure_mutable()
+        if len(args) == 1:
+            pts = torch.as_tensor(args[0])
+        elif len(args) == 3:
+            pts = torch.vstack([torch.as_tensor(v) for v in args])
+        elif len(args) == 6:
+            pts = torch.stack([torch.as_tensor(v) for v in args]).reshape(3,2)
+        else:
+            raise ValueError("bezier_vertex expects 3 points or 6 scalars")
+
         pts = torch.vstack(args)
         self._start_contour_if_needed()
         self._flush_spline()
@@ -837,8 +1093,12 @@ class Shape:
         self._num_ctrl += [2] 
 
     def _polyline(self, points, closed):
+        self._ensure_mutable()
         self._contour.append(torch.as_tensor(points))
-        self._num_ctrl += [0]*len(points)
+        nseg = len(points)
+        if closed:
+            nseg += 1
+        self._num_ctrl += [0]*nseg
         
     def polyline(self, points, close=False):
         """Add a contour of straight line segments from a sequence of (x,y) points."""
@@ -849,6 +1109,7 @@ class Shape:
         self.end_contour(close)
 
     def _multibezier(self, points, close):
+        self._ensure_mutable()
         num_segs = num_bezier(points, close)
         self._contour.append(torch.as_tensor(points))
         self._num_ctrl += [2]*num_segs
@@ -878,7 +1139,7 @@ class Shape:
         self.end_contour(close)
                  
     def _start_contour_if_needed(self):
-        if not self._current:
+        if not self._contour:
             self.begin_contour()
 
     def _flush_spline(self, close=False):
@@ -893,12 +1154,29 @@ class Shape:
             pts = torch.vstack([self._spline_start] + pts)
         
         cp = cardinal_spline(pts, self.tension, closed=close)
-        num_segs = num_bezier(cp, closed)
-        self._contour.append(torch.as_tensor(cp))
-        self._num_ctrl += [2]*num_segs
-        
+
+        if self._contour:
+            cp = cp[1:]
+            m = len(cp)//3
+        else:
+            m = (len(cp) - 1)//3
+
+        if m <= 0:
+            print("Invalid number of control points for spline")
+            self._curve_points = []
+            self._spline_start = None
+            return
+
+        self._contour.append(cp)
+        self._num_ctrl += [2] * m
         self._curve_points = []
         self._spline_start = None
+
+    def clone(self):
+        new = Shape(tension=self.tension)
+        new.contours = [ctr for ctr in self.contours]
+        new.reset()
+        return new
 
     def build(self, c):
         """Build diffvg primitives"""
@@ -917,6 +1195,7 @@ class Shape:
                 shapes.append(path)
             else: # Assume a diffVg object added externally by canvas
                 shapes.append(ctr)
+        self._built = True
         return shapes
 
 
