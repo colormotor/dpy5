@@ -1,6 +1,6 @@
 # py5diff - Processing-like Differentiable Vector Graphics
 
-`py5diff` provides a Processing‑inspired API (e.g., `push()`, `pop()`, `fill()`, `stroke()`, `line()`, `curve()`) for building **differentiable* 2D vector scenes. Under the hood it uses torch and [pydiffvg](https://github.com/BachiLi/diffvg) and PyTorch, so all parameters are tensors, and gradients can flow through the rendering process.
+`py5diff` provides a Processing‑inspired API (e.g., `push()`, `pop()`, `fill()`, `stroke()`, `line()`, `curve()`) for building *differentiable* 2D vector scenes. Under the hood it uses [pydiffvg](https://github.com/BachiLi/diffvg) and [PyTorch](https://pytorch.org), so all parameters are tensors, and gradients can flow through the rendering process.
 
 ## Installation
 
@@ -32,16 +32,18 @@ c.polyline([[50, 50], [200, 50], [200, 200], [50, 200]], close=True)
 img = c.render() # Returns tensor
 c.get_image()
 ``` 
-The corresponding DiffVG scene is cleared when =background= is called and then constructed as each drawing method is called. Calling =render= at the end rasterizes the scene while allowing gradient propagation to any parameter used in the drawing procedures.
+The corresponding DiffVG scene is cleared when `background` is called (think of it as a `begin`) and then re-constructed each time as drawing commands are called. Calling `render` at the end rasterizes the scene while allowing gradient propagation to any parameter used in the drawing procedures.
 
-Optimizing a scene involves re-drawing the scene at each optimization step and eventually using the otuput of `render` to compute losses in image space.
+A typical optimization loop, involves re-drawing the scene at each step and using the otuput of `render` to compute some loss function with respect to the rendered image.
 
 ### Optimization example
-While it is possible to explictly pass in tensors to the `DiffCanvas` drawing methods and explictly optimizing these, the API allows you to do so more concisely by using the `c.var(value, group_name)` syntax. This method returns a PyTorch tensor with `requires_grad=True`. Providing a `group_name` caches the tensor so it can be retrieved with `c.get_vars(group_name)` and passed to an optimizer.
+All drawing functions accept python sequences (e.g. lists, tuples, numpy arrays or pytorch tensors). Passing arguments as tensors with gradients enabled (`requires_grad=True`) will enable gradient propagation to the arguments. While doing so explictly is possible (e.g. `c.polyline(some_tensor)`), the API allows you to do so more concisely by using the `c.var(value, group_name)` syntax. 
 
-> Note: while this caching method saves typing, it expects the drawing order to remain unchanged for each step of the optimization. 
+This method returns a PyTorch tensor with `requires_grad=True` and providing a `group_name` caches the tensor so it can be retrieved later with `c.get_vars(group_name)` and passed on to an optimizer of choice. The values passed in to `c.var` will be used as initial values for the tensor, but in subsequent calls to the drawing sequence `DiffCanvas` will use the cached tensors instead of creating new ones, as long as the same variable creation order is maintained.
 
-Here is a simple example of an optimization loop that adapts a series of curves to minimize the L1 error with a target image:
+> Note: while this caching method saves typing, it expects the drawing order and tensor sizes to remain unchanged for each step of the optimization. 
+
+Here is a simple example of an optimization loop that adapts a series of curves to minimize the L1 error with a target image and displays the results:
 
 ``` python
 import os
