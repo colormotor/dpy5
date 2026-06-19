@@ -1,4 +1,4 @@
-# $D$py5 - Processing-like Differentiable Vector Graphics
+# $D$ py5 - Processing-like Differentiable Vector Graphics
 
 `py5diff` provides a Processing-inspired API (e.g., `push()`, `pop()`, `fill()`, `stroke()`, `line()`, `curve()`) for building *differentiable* 2D vector scenes. Under the hood it uses [pydiffvg](https://github.com/BachiLi/diffvg) and [PyTorch](https://pytorch.org), so all parameters are tensors and gradients can flow through the rendering process. It provides an "immediate mode" API on top of DiffVG, making it easier to experiment and build geometry through the composition of differentiable operations.
 
