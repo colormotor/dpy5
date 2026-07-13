@@ -2,7 +2,7 @@
 
 `dpy5` provides a Processing-inspired API (e.g., `push()`, `pop()`, `fill()`, `stroke()`, `line()`, `curve()`) for building *differentiable* 2D vector scenes. Under the hood it uses [pydiffvg](https://github.com/BachiLi/diffvg) and [PyTorch](https://pytorch.org), so all parameters are tensors and gradients can flow through the rendering process. It provides an "immediate mode" API on top of DiffVG, making it easier to experiment and build geometry through the composition of differentiable operations.
 
-dpy5 can be used standalone in Python scripts or Jupyter notebooks, but its API is almost identical to [Py5canvas](https://github.com/colormotor/py5canvas), so it can also be used alongside it to create sketches that leverage differentiable rasterization.
+`dpy5` can be used standalone in Python scripts or Jupyter notebooks, but its API is almost identical to [Py5canvas](https://github.com/colormotor/py5canvas), so it can also be used alongside it to create sketches that leverage differentiable rasterization.
 ## Installation
 
 Prerequisites:
