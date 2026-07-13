@@ -1,9 +1,24 @@
-#!/usr/bin/env python3
+'''
+ _____              _____ 
+|  __ \            | ____|
+| |  | |_ __  _   _| |__  
+| |  | | '_ \| | | |___ \ 
+| |__| | |_) | |_| |___) |
+|_____/| .__/ \__, |____/ 
+       | |     __/ |      
+       |_|    |___/
+
+Processing-like API for DiffVG
+© Daniel Berio (@colormotor) 2026 - ...
+
+Various helpers
+'''
+
 from collections import defaultdict
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-import time
+import time, os, sys
 from . import diff_canvas
 from PIL import Image
 
@@ -297,6 +312,103 @@ class MultiLoss:
                 if i % n_cols != 0:
                     imgui.same_line()
                 imgui.text(text)
+
+
+def show_animation(
+    fig, frame, num_frames, ax=None, filename="", fps=30, headless=False
+):
+    """Show a matplotlib animated plot, each frame is rendered by automatically calling `frame`
+    Optionally saves a video, if opencv is installed and `filename` is defined
+    """
+    from matplotlib.animation import FuncAnimation
+    import matplotlib.pyplot as plt
+    from io import BytesIO
+    from PIL import Image
+
+    frames = []
+    ani = None
+
+    if ax is None:
+        ax = plt.gca()
+
+    state = lambda: None
+    state.playing = True
+
+    def _frame(i):
+
+        plt.clf()
+        try:
+            cur_frame = frame(i)
+        except Exception as e:
+            if ani is not None:
+                ani.event_source.stop()
+            print(e)
+            raise e
+
+        fig = plt.gcf()
+        if filename:
+            if cur_frame is None:
+                buf = BytesIO()
+                plt.savefig(buf, format="png")
+                buf.seek(0)
+                image = Image.open(buf)
+            else:
+                if isinstance(cur_frame, np.ndarray):
+                    if cur_frame.dtype != np.uint8:
+                        cur_frame = (cur_frame * 255).astype(np.uint8)
+                    cur_frame = Image.fromarray(cur_frame)
+                image = cur_frame.convert("RGB")
+            frames.append(np.array(image)[:, :, :3])
+        if i == num_frames - 1:
+            print("Animation ended")
+            if ani is not None:
+                ani.event_source.stop()
+            state.playing = False
+
+    norepeat = os.getenv("QUIT_ANIMATION") == "1"
+
+    if not headless:
+        ani = FuncAnimation(
+            fig,
+            _frame,
+            frames=num_frames,
+            blit=False,
+            repeat=not norepeat,
+            interval=1000 / fps,
+        )
+
+        # Ugly workaround because func anim does not let us close
+        if norepeat:
+            import threading
+
+            def monitor_animation():
+                while state.playing:
+                    time.sleep(0.5)
+                print("Closing animation")
+                plt.close(fig)
+
+            monitor_thread = threading.Thread(target=monitor_animation)
+            monitor_thread.start()
+        try:
+            plt.show()
+        except AttributeError as e:
+            print("Closing")
+    else:
+        for i in range(num_frames):
+            print("Headless: step %d of %d" % (i + 1, num_frames))
+            _frame(i)
+
+    if filename and frames:
+        print("saving %d frames" % len(frames))
+        import cv2
+
+        fmt = cv2.VideoWriter_fourcc(*"mp4v")
+        h, w, _ = frames[0].shape
+        video_writer = cv2.VideoWriter(filename, fmt, fps, (w, h))
+        for frame in frames:
+            video_writer.write(frame[:, :, ::-1])
+        video_writer.release()
+        print("Finished saving")
 
 
 class perf_timer:
