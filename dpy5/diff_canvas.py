@@ -332,10 +332,12 @@ class DiffCanvas:
     def no_fill(self):
         """Do not fill subsequent shapes"""
         self.fill(None)
+        return self
 
     def no_stroke(self):
         """Do not stroke subsequent shapes"""
         self.stroke(None)
+        return self
 
     def fill_rule(self, rule):
         """Sets the fill rule for complex shapes.
@@ -344,22 +346,24 @@ class DiffCanvas:
         - One of `"evenodd"`, `"nonzero"`, or `"winding"`
         """
         self._fill_rule = rule
+        return self
 
-    def angle_mode(self, mode="degrees"):
+    def angle_mode(self, mode):
         mode = mode.lower()
         if not mode in ["degrees", "radians"]:
             raise ValueError("invalid angle mode, use either RADIANS or DEGREES")
         self._angle_mode = mode
+        return self
 
     def _to_radians(self, ang):
         if self._angle_mode == "radians":
             return ang
-        return radians(ang)
+        return np.radians(ang)
 
     def _to_degrees(self, ang):
         if self._angle_mode == "degrees":
             return ang
-        return degrees(ang)
+        return np.degrees(ang)
 
     def _get_color(self, *args):
         if len(args) == 1:
@@ -404,6 +408,7 @@ class DiffCanvas:
             self.height, self.width, 3, dtype=torch.float32, device=self.device
         )
         self._bg[...] = torch.as_tensor(clr).to(self.dtype).to(self.device)
+        return self
 
     def fill(self, *args):
         """Set the color of the current fill
@@ -419,6 +424,7 @@ class DiffCanvas:
             self.cur_fill = None
         else:
             self.cur_fill = self._get_color(*args)
+        return self
 
     def stroke(self, *args):
         """Set the color of the current stroke
@@ -434,6 +440,7 @@ class DiffCanvas:
             self.cur_stroke = None
         else:
             self.cur_stroke = self._get_color(*args)
+        return self
 
     def stroke_weight(self, w):
         """Set the line width
@@ -442,12 +449,14 @@ class DiffCanvas:
         - The width in pixel of the stroke
         """
         self._line_width = w
+        return self
 
     def curve_tightness(self, val):
         """Sets the 'tension' parameter for the curve used when using `curve_vertex`"""
         self._tension = val
         if self.cur_shape is not None:
             self.cur_shape.tension = val
+        return self
 
     def rect_mode(self, mode):
         """Set the "mode" for drawing rectangles.
@@ -462,6 +471,7 @@ class DiffCanvas:
             print("choose one among: corner, center, radius")
             return
         self._rect_mode = mode
+        return self
 
     def ellipse_mode(self, mode):
         """Set the "mode" for drawing rectangles.
@@ -475,12 +485,14 @@ class DiffCanvas:
             print("choose one among: corner, center")
             return
         self._ellipse_mode = mode
+        return self
 
     def begin_shape(self):
         """Start building a complex shape. Drawing is deferred until end_shape()."""
         self.cur_shape = Shape(tension=self._tension)
         self.cur_shape.begin_shape()
         self.building_shape = True
+        return self
 
     def end_shape(self, close=False):
         """Finish the shape and draw it."""
@@ -490,6 +502,7 @@ class DiffCanvas:
         self.cur_shape.end_shape(close)
         self._build_shape(self.cur_shape)
         self.cur_shape = None
+        return self
 
     def begin_contour(self):
         """Start a new contour within the currently built shape.
@@ -498,6 +511,7 @@ class DiffCanvas:
             self.cur_shape = Shape(tension=self._tension)
             self.cur_shape.begin_shape()
         self.cur_shape.begin_contour()
+        return self
 
     def end_contour(self, close=False):
         """End the current contour. If not inside a begin_shape/end_shape block,
@@ -516,6 +530,7 @@ class DiffCanvas:
             self.cur_shape.end_shape()
             self._build_shape(self.cur_shape)
             self.cur_shape = None
+        return self
 
     def vertex(self, *args):
         """Add a vertex to current contour
@@ -528,6 +543,7 @@ class DiffCanvas:
         if self.cur_shape is None:
             raise RuntimeError("vertex() called without begin_shape()")
         self.cur_shape.vertex(*args)
+        return self
 
     def curve_vertex(self, *args):
         """Add a curved vertex to current contour
@@ -540,6 +556,7 @@ class DiffCanvas:
         if self.cur_shape is None:
             raise RuntimeError("curve_vertex() called without begin_shape()")
         self.cur_shape.curve_vertex(*args)
+        return self
 
     def bezier_vertex(self, *args):
         """Draw a cubic Bezier segment from the current point
@@ -554,6 +571,7 @@ class DiffCanvas:
         if self.cur_shape is None:
             raise RuntimeError("bezier_vertex() called without begin_shape()")
         self.cur_shape.bezier_vertex(*args)
+        return self
 
     def polyline(self, *args, close=False):
         """Draw a polyline (open by default).
@@ -575,10 +593,12 @@ class DiffCanvas:
         self.begin_contour()
         self.cur_shape._polyline(points, close)
         self.end_contour(close)
+        return self
 
     def polygon(self, points):
         """Draw a closed polygon from a sequence of (x,y) points."""
         self.polyline(points, close=True)
+        return self
 
     def multibezier(self, *args, close=False):
         """
@@ -602,6 +622,7 @@ class DiffCanvas:
         self.begin_contour()
         self.cur_shape._multibezier(points, close)
         self.end_contour(close)
+        return self
 
     def curve(self, *args, close=False):
         """
@@ -625,6 +646,7 @@ class DiffCanvas:
         self.begin_contour()
         self.cur_shape._curve(points, close)
         self.end_contour(close)
+        return self
 
     def shape(self, obj, close=False):
         """Draw a pre‑built Shape object or a list of polylines (list of lists/arrays).
@@ -651,6 +673,7 @@ class DiffCanvas:
             tmp_shape.polyline(pts, close)
         tmp_shape.end_shape()
         self._build_shape(tmp_shape)
+        return self
 
     def _as_point(self, p):
         """Convert a 2D point to a differentiable tensor while preserving grads."""
@@ -749,6 +772,7 @@ class DiffCanvas:
                 ]
             )
             self.multibezier(pts, close=True)
+        return self
 
     rect = rectangle
 
@@ -765,6 +789,7 @@ class DiffCanvas:
             self.rectangle(args[0], args[1], args[2], args[2], mode=mode)
         else:
             raise ValueError("square: wrong number of arguments")
+        return self
 
     def quad(self, *args):
         """Draw a quadrilateral."""
@@ -775,6 +800,7 @@ class DiffCanvas:
         else:
             raise ValueError("quad: wrong number of arguments")
         self.polygon(points)
+        return self
 
     def triangle(self, *args):
         """Draw a triangle."""
@@ -785,6 +811,7 @@ class DiffCanvas:
         else:
             raise ValueError("triangle: wrong number of arguments")
         self.polygon(points)
+        return self
 
     def ellipse(self, *args, mode=None):
         """Draw an ellipse.
@@ -805,7 +832,7 @@ class DiffCanvas:
 
         if len(args) == 2:
             center = self._to(args[0])
-            size = self._to(args[1])
+            size = self._as_size(args[1])
         elif len(args) == 3:
             if is_number(args[0]):
                 center = self._vec(args[0], args[1])
@@ -852,6 +879,7 @@ class DiffCanvas:
         )
 
         self.multibezier(pts, close=True)
+        return self
 
     def circle(self, *args, mode=None):
         """Draw a circle.
@@ -880,6 +908,7 @@ class DiffCanvas:
             center = center + size
 
         self.ellipse(center, size, size, mode="center")
+        return self
 
     ###############################################
     # Scene management
@@ -968,6 +997,7 @@ class DiffCanvas:
 
         if self._bg is not None:
             img = img[:, :, 3:4] * img[:, :, :3] + bg * (1 - img[:, :, 3:4])
+            # Convert to RGB only with background otherwise keep alpha
             img = img[:, :, :3]
 
         self.img = img
@@ -1057,6 +1087,7 @@ class Shape:
         self.tension = tension
         self.contours = []  # list of contour command lists
         self._built = False
+        self._shape_active = False  # True between begin_shape()/end_shape()
         self.reset()
 
     def reset(self):
@@ -1064,7 +1095,6 @@ class Shape:
         self._num_ctrl = []
         self._curve_points = []  # pending Catmull‑Rom points for curve_vertex
         self._spline_start = None  # first point of the current spline (move-to)
-        self._shape_active = False  # True between begin_shape()/end_shape()
 
     def _ensure_mutable(self):
         if self._built:
@@ -1114,11 +1144,11 @@ class Shape:
         if len(args) > 1:
             x = torch.stack([torch.as_tensor(v) for v in args])
         else:
-            x = args[0]
+            x = torch.as_tensor(args[0])
         self._start_contour_if_needed()
         self._flush_spline()
         self._contour.append(x)
-        self._num_ctrl += [1]
+        self._num_ctrl += [0]
 
     def curve_vertex(self, *args):
         """Add a curved vertex (Catmull Rom spline)."""
@@ -1126,7 +1156,7 @@ class Shape:
         if len(args) > 1:
             x = torch.stack([torch.as_tensor(v) for v in args])
         else:
-            x = args[0]
+            x = torch.as_tensor(args[0])
 
         self._start_contour_if_needed()
         if not self._curve_points:
@@ -1148,7 +1178,6 @@ class Shape:
         else:
             raise ValueError("bezier_vertex expects 3 points or 6 scalars")
 
-        pts = torch.vstack(args)
         self._start_contour_if_needed()
         self._flush_spline()
         self._contour.append(pts)
@@ -1224,7 +1253,7 @@ class Shape:
             cp = cp[1:]
             m = len(cp) // 3
         else:
-            m = (len(cp) - 1) // 3
+            m = (len(cp) - 1) // 3  # TODO test me
 
         if m <= 0:
             print("Invalid number of control points for spline")

@@ -226,9 +226,11 @@ class MultiLoss:
                         )
                 call_args[name] = tuple(args)
 
+        # Trick to inject external losses (TODO test)
         for key, val in kwargs.items():
             if "loss" in key and isinstance(val, torch.Tensor):
-                call_args[key] = val
+                if key not in self.items:
+                    call_args[key] = val
 
         total = None
         for name, args in call_args.items():

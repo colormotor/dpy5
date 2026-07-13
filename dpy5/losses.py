@@ -228,7 +228,7 @@ def load_clip_model(model_name, device):
     if model_name in cfg.clip_models:
         print(model_name, "already loaded")
         return cfg.clip_models[model_name]
-
+    preloaded = False
     if model_name == "CLIPAG":
         print("Downlading CLIPAG")
         url = "https://zenodo.org/records/10446026/files/CLIPAG_ViTB32.pt?download=1"
@@ -236,6 +236,18 @@ def load_clip_model(model_name, device):
         download_file_once(url, path)
         pretrained = path
         model_name = "ViT-B-32"
+    elif "FARE4" in model_name:
+        model_name = "hf-hub:chs20/FARE4-ViT-B-32-laion2B-s34B-b79K"
+        model, _, preprocess = open_clip.create_model_and_transforms(
+            model_name, device=device
+        )
+        preloaded = True
+    elif "TeCoA4" in model_name:
+        model_name = "hf-hub:chs20/TeCoA4-ViT-B-32-laion2B-s34B-b79K"
+        model, _, preprocess = open_clip.create_model_and_transforms(
+            model_name, device=device
+        )
+        preloaded = True
     else:
         pretrained_map = {
             "ViT-H/14-quickgelu": "dfn5b",
@@ -263,13 +275,14 @@ def load_clip_model(model_name, device):
             "ViT-B-32-256": "datacomp_s34b_b86k",
         }
         pretrained = pretrained_map[model_name]
-    model, _, preprocess = open_clip.create_model_and_transforms(
-        model_name,
-        pretrained=pretrained,
-        precision="amp",
-        weights_only=False,  # Breaks otherwise
-        device=device,
-    )
+    if not preloaded:
+        model, _, preprocess = open_clip.create_model_and_transforms(
+            model_name,
+            pretrained=pretrained,
+            precision="amp",
+            weights_only=False,  # Breaks otherwise
+            device=device,
+        )
     try:
         input_size = preprocess.transforms[0].size[0]
     except TypeError:
