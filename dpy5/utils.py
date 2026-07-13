@@ -1,4 +1,4 @@
-'''
+"""
  _____              _____ 
 |  __ \            | ____|
 | |  | |_ __  _   _| |__  
@@ -12,7 +12,7 @@ Processing-like API for DiffVG
 © Daniel Berio (@colormotor) 2026 - ...
 
 Various helpers
-'''
+"""
 
 from collections import defaultdict
 import torch
