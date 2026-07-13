@@ -5,11 +5,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 from . import diff_canvas
-
+from PIL import Image
 
 
 class CanvasOptimizer:
-    ''' Helper for optimization loops. Wraps a `DiffCanvas` instance
+    """Helper for optimization loops. Wraps a `DiffCanvas` instance
     and provides callbacks for initialization (`init`), setting up optimizers (`setup`),
     drawing (`draw`) loss computation (`loss`) and clipping values or other post processing oparations (`postprocess`).
     To use this, subclass `CanvasOptimizer` with a class that overrides these methods, and then call `step` in a loop.
@@ -21,24 +21,24 @@ class CanvasOptimizer:
         def init(self, c):
             # Initialize parameters once before draw (optional)
             ...
-    
+
         def draw(self, c):
             c.background(1.0)
             ....
             return c.render()
-            
+
         def postprocess(self, c):
             # Clamp values if necessary
             with torch.no_grad():
                 for v in c.get_vars('some variables'):
                     v.data.clamp_(0, 1)
-                
+
         def setup(self, c):
             self.optimizers = [
                                 torch.optim.Adam(c.get_vars('some variables'), lr=1.0),
             ]
             # optionally add schedulers to `self.schedulers`
-            
+
 
         def loss(self, img):
             # Compute some loss based on img (the output of the renderer at each step)
@@ -47,40 +47,40 @@ class CanvasOptimizer:
 
         opt = MyCanvasOpt(w, h)
     ```
-    '''
-    
-    def __init__(self, w, h, verbose=False):
+    """
+
+    def __init__(self, w, h, num_opt_steps, verbose=False):
         self.c = diff_canvas.DiffCanvas(w, h)
         self.optimizers = []
         self.schedulers = []
-        self.init(self.c)
-        self.draw(self.c)
         self.running = False
         self.epoch = 0
-        self.num_opt_steps = 0
+        self.num_opt_steps = num_opt_steps
         self.verbose = verbose
-        
+        self.init(self.c)
+        self.img = self.draw(self.c)
+
     ######################################
     # Functions for user to override
     def init(self, c):
         """called once before drawing starts, can be used to initialize variables"""
         pass
-    
+
     def setup(self, c):
         """Setup optimizers and schedulers
-           these must be added to `self.optimizers` and `self.schedulers`.
-           The lists will be cleared automatically when calling `run`
+        these must be added to `self.optimizers` and `self.schedulers`.
+        The lists will be cleared automatically when calling `run`
         """
         pass
 
     def release(self):
         """Optionally release heavy-weight objects"""
         pass
-    
+
     def draw(self, c):
         """Construct/render the scene. Called every step."""
         pass
-    
+
     def loss(self, img):
         """Compute and return loss for each step"""
         return 0.0
@@ -88,10 +88,10 @@ class CanvasOptimizer:
     def postprocess(self, c):
         """Optionally clamp values or other procedures after each opt step"""
         pass
-    
+
     ######################################
     # Built in
-    
+
     def step(self):
         # Peform an optimization step if optimizing
         if not self.running:
@@ -101,13 +101,14 @@ class CanvasOptimizer:
             opt.zero_grad()
 
         img = self.draw(self.c)
+        self.img = img
 
         if self.epoch >= self.num_opt_steps:
             print("Stopping", self.epoch)
             self.running = False
             self.release()
             return
-        
+
         loss = self.loss(img)
         loss.backward()
         for opt in self.optimizers:
@@ -116,20 +117,21 @@ class CanvasOptimizer:
             sched.step()
         self.postprocess(self.c)
         self.epoch += 1
-        
-        
-    def run(self, num_steps):
+
+    def run(self, num_steps=0):
+
         self.optimizers = []
         self.schedulers = []
         self.epoch = 0
-        self.num_opt_steps = num_steps
+        if num_steps:
+            self.num_opt_steps = num_steps
         self.setup(self.c)
         self.running = True
-        
-    def get_image(self):
-        return self.c.get_image()
 
-    
+    def get_image(self):
+        return Image.fromarray((self.img.detach().cpu().numpy() * 255).astype(np.uint8))
+
+
 class MultiLoss:
     """Helper for managing multiple losses organized by name and input
     Keeps track of losses and enables visualization with matplotlib or py5canvas (implot)
@@ -163,9 +165,10 @@ class MultiLoss:
     loss = ml(pred_img, target=target_img, aux=aux_img)
     ```
     """
+
     def __init__(self, max_history=1000):
-        self.items = {}      # name -> [loss_fn, weight]
-        self.formats = {}    # name -> input format list / None
+        self.items = {}  # name -> [loss_fn, weight]
+        self.formats = {}  # name -> input format list / None
         self.history = defaultdict(list)
         self.max_history = max_history
 
@@ -204,11 +207,12 @@ class MultiLoss:
                         args.append(kwargs[spec])
                     else:
                         raise ValueError(
-                            f"expected `{spec}` for loss `{name}` but did not get it")
+                            f"expected `{spec}` for loss `{name}` but did not get it"
+                        )
                 call_args[name] = tuple(args)
 
         for key, val in kwargs.items():
-            if 'loss' in key and isinstance(val, torch.Tensor):
+            if "loss" in key and isinstance(val, torch.Tensor):
                 call_args[key] = val
 
         total = None
@@ -230,60 +234,61 @@ class MultiLoss:
 
             self.history[name].append(float(l.detach().cpu()))
             if len(self.history[name]) > self.max_history:
-                self.history[name] = self.history[name][-self.max_history:]
+                self.history[name] = self.history[name][-self.max_history :]
 
         if total is None:
             total = torch.tensor(0.0)
 
-        self.history['total'].append(float(total.detach().cpu()))
+        self.history["total"].append(float(total.detach().cpu()))
         return total
 
     def get_losses(self):
         return {k: list(v) for k, v in self.history.items()}
 
     def to_string(self, n=1):
-        res = ''
+        res = ""
         for key in self.items:
             v = self.history.get(key, [])
             if v:
-                res += f'{key} w:{self.items[key][1]:.4f} loss:{v[-1]:.6f}\n'
+                res += f"{key} w:{self.items[key][1]:.4f} loss:{v[-1]:.6f}\n"
         return res
 
-    def plot(self, n=None, title='Loss'):
+    def plot(self, n=None, title="Loss"):
         plt.figure()
         plt.title(title)
         if n is None:
             n = self.max_history
         for key, kloss in self.history.items():
-            if key == 'total' or not self.has_loss(key):
+            if key == "total" or not self.has_loss(key):
                 continue
             if not kloss:
                 continue
-            plt.plot(kloss[-n:], label=f'{key}:{kloss[-1]:.4f}')
+            plt.plot(kloss[-n:], label=f"{key}:{kloss[-1]:.4f}")
         plt.legend()
-        plt.xlabel('step')
-        plt.ylabel('loss')
+        plt.xlabel("step")
+        plt.ylabel("loss")
 
     def implot(self, n=50):
-        ''' Plot inthe UI of an interactive py5canvas sketch'''
+        """Plot inthe UI of an interactive py5canvas sketch"""
         from slimgui import implot, imgui
+
         parts = []
-        if implot.begin_plot('Loss', size=[-1, 200]):
-            implot.setup_axes(None, None,
-                              implot.AxisFlags.AUTO_FIT,
-                              implot.AxisFlags.AUTO_FIT)
+        if implot.begin_plot("Loss", size=[-1, 200]):
+            implot.setup_axes(
+                None, None, implot.AxisFlags.AUTO_FIT, implot.AxisFlags.AUTO_FIT
+            )
             for key, kloss in self.history.items():
-                if key == 'total':
+                if key == "total":
                     continue
-                if not self.has_loss(key) and 'loss' not in key:
+                if not self.has_loss(key) and "loss" not in key:
                     continue
                 if not kloss:
                     continue
                 arr = np.array(kloss[-n:], dtype=np.float32)
                 arr = arr - np.mean(arr)
-                last_s = f'{float(arr[-1]):.3f}'
-                parts.append(f'{key}: {last_s}')
-                implot.plot_line(f'{key}##loss_{key}', arr)
+                last_s = f"{float(arr[-1]):.3f}"
+                parts.append(f"{key}: {last_s}")
+                implot.plot_line(f"{key}##loss_{key}", arr)
             implot.end_plot()
 
         if parts:
@@ -295,18 +300,18 @@ class MultiLoss:
 
 
 class perf_timer:
-    def __init__(self, name='', verbose=True):
-        #if name and verbose:
+    def __init__(self, name="", verbose=True):
+        # if name and verbose:
         #    print(name)
         self.name = name
         self.verbose = verbose
         self.elapsed = 0
-        
+
     def __enter__(self):
         self.t = time.perf_counter()
         return self
 
     def __exit__(self, type, value, traceback):
-        self.elapsed = (time.perf_counter() - self.t)*1000
+        self.elapsed = (time.perf_counter() - self.t) * 1000
         if self.name and self.verbose:
-            print('%s: elapsed time %.3f milliseconds'%(self.name, self.elapsed))
+            print("%s: elapsed time %.3f milliseconds" % (self.name, self.elapsed))
