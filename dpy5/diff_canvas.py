@@ -104,6 +104,7 @@ def draw_states_properties(*names):
     "_fill_rule",
     "_tension",
 )
+
 class DiffCanvas:
     """
     A differentiable 2D vector graphics canvas based on DiffVG, using a Processing-like syntax.
@@ -257,6 +258,13 @@ class DiffCanvas:
     _to = to
 
     def translate(self, *args):
+        """Translate by specifying `x` and `y` offset.
+
+        Arguments:
+
+        - The offset can be specified as an array/list/tensor (e.g `translate([x,y])`
+          or as single arguments (e.g. `translate(x, y)`)
+        """
         if len(args) == 1:
             p = self._to(args[0])
             x, y = p
@@ -266,6 +274,7 @@ class DiffCanvas:
         self._transform = self._transform @ M
 
     def rotate(self, angle):
+        """Rotate by `theta` radians (or degrees, depeending on the angle mode)"""
         # angle in rad, differentiable
         angle = self._to(angle)
         c, s = torch.cos(angle), torch.sin(angle)
@@ -273,6 +282,15 @@ class DiffCanvas:
         self._transform = self._transform @ M
 
     def scale(self, *args):
+        """Apply a scaling transformation.
+
+        Arguments:
+
+        - Providing a single number will apply a uniform transformation.
+        - Providing a pair of number will scale in the x and y directions.
+        - The scale can be specified as an array/list/tensor (e.g `scale([x,y])`
+        or as single arguments (e.g. `scale(x, y)`)'''
+        """
         if len(args) == 1:
             s = args[0]
             s = self._to(s)
@@ -945,8 +963,14 @@ class DiffCanvas:
         # store for instancing if shape is called with same object multiple times
         self.shape_to_inds[shape] = inds
 
-    # Override simple shapes
     def line(self, *args):
+        """Draws a line between two points
+
+        Input arguments can be in the following formats:
+
+         - `a, b` (Two points specified as lists/tuples/arrays/tensors
+         - `x1, y1, x2, y2`, a sequence of numbers, one for each coordinate
+        """
         if len(args) == 2:
             a, b = [self._to(v) for v in args]
         elif len(args) == 4:
@@ -958,8 +982,14 @@ class DiffCanvas:
 
         self.polyline(torch.vstack([a, b]))
 
-    # Shape building (same as parent, but end_shape appends)
     def render(self, prefiltering=False, num_samples=2, seed=0, sdf=False):
+        """Render the canvas output
+
+        Arguments:
+        - `prefiltering`: if `True`, uses an anti‑aliasing prefilter. Produces crisper lines, but does not support variable width strokes and produces artefacts in some cases.
+        - `num_samples`: number of x and y samples for Montecarlo boundary sampling in DiffVG.
+        - `sdf`: if `True`, outputs a signed distance field.
+        """
         self.building = False
 
         if prefiltering:
@@ -1004,11 +1034,13 @@ class DiffCanvas:
         return img
 
     def get_image(self):
+        """Return the rendered output as a PIL Image"""
         assert self.img is not None
         img = self.img.detach().cpu().numpy()
         return Image.fromarray((img * 255).astype(np.uint8))
 
     def get_array(self):
+        """Return the rendererd output as a NumPy array"""
         assert self.img is not None
         img = self.img.detach().cpu().numpy()
         return img
@@ -1032,10 +1064,12 @@ class DiffCanvas:
         c.curve(c.var([[0,0], [100,0], [100,100]], 'pts'))
         c.curve(c.var([[20,0], [10,40], [100,100]], 'pts'))
         ```
-        Will cache two tensors that can be retrieved as a list with `c.get_vars('pts')`.
+        This will cache two tensors that can be retrieved as a list with `c.get_vars('pts')`.
+
         Modifying these tensors will modify the values used in subsequent calls to the
         same drawing sequence, meaning we can optimize the variable in a loop.
-        While handy, note that changing the rendering order after these variables are cached,
+
+        > NOTE: While this is handy to avoid setup code, keep in mind that alterning the rendering order after these variables have been cached
         will result in unexpected behaviors.
         """
         v = torch.as_tensor(v).to(self.dtype).to(self.device)

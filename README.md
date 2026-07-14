@@ -2,7 +2,8 @@
 
 `dpy5` provides a Processing-inspired API (e.g., `push()`, `pop()`, `fill()`, `stroke()`, `line()`, `curve()`) for building *differentiable* 2D vector scenes. Under the hood it uses [pydiffvg](https://github.com/BachiLi/diffvg) and [PyTorch](https://pytorch.org), so all parameters are tensors and gradients can flow through the rendering process. It provides an "immediate mode" API on top of DiffVG, making it easier to experiment and build geometry through the composition of differentiable operations.
 
-`dpy5` can be used standalone in Python scripts or Jupyter notebooks, but its API is almost identical to [Py5canvas](https://github.com/colormotor/py5canvas), so it can also be used alongside it to create sketches that leverage differentiable rasterization.
+`dpy5` can be used standalone in Python scripts or Jupyter notebooks, but its API is almost identical to [Py5canvas](https://github.com/colormotor/py5canvas), so it can also be used alongside it to create sketches that take advantage of differentiable rasterization.
+
 ## Installation
 
 Prerequisites:
@@ -33,6 +34,7 @@ c.polyline([[50, 50], [200, 50], [200, 200], [50, 200]], close=True)
 img = c.render() # Returns tensor
 c.get_image()
 ``` 
+
 The corresponding DiffVG scene is cleared when `background` is called (think of it as a `begin`) and then re-constructed each time as drawing commands are called. Calling `render` at the end rasterizes the scene while allowing gradient propagation to any parameter used in the drawing procedures.
 
 A typical optimization loop, involves re-drawing the scene at each step and using the otuput of `render` to compute some loss function with respect to the rendered image.
