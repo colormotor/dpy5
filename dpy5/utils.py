@@ -229,8 +229,8 @@ class MultiLoss:
         # Trick to inject external losses (TODO test)
         for key, val in kwargs.items():
             if "loss" in key and isinstance(val, torch.Tensor):
-                if key not in self.items:
-                    call_args[key] = val
+                # if key not in self.items:
+                call_args[key] = val
 
         total = None
         for name, args in call_args.items():
@@ -271,12 +271,11 @@ class MultiLoss:
         return res
 
     def plot(self, n=None, title="Loss"):
-        plt.figure()
         plt.title(title)
         if n is None:
             n = self.max_history
         for key, kloss in self.history.items():
-            if key == "total" or not self.has_loss(key):
+            if key == "total":
                 continue
             if not kloss:
                 continue

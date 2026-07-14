@@ -74,6 +74,8 @@ class CLIPVisualLoss(torch.nn.Module):
         crop_scale=0.9,
         distortion_scale=0.5,
         vis_metric="mse",
+        blur_sigma=None,
+        blur_kernel=21,
         layer_weights=[(2, 1.0), (3, 1.0)],
         device=None,
     ):
@@ -87,6 +89,9 @@ class CLIPVisualLoss(torch.nn.Module):
         self.semantic_w = semantic_w
         self.geometric_w = geometric_w
 
+        self.blur_sigma = blur_sigma
+        self.blur_kernel = blur_kernel
+        
         if clipag:
             clip_model = "CLIPAG"
         model, preprocess, tokenizer, self.input_size = load_clip_model(
@@ -173,11 +178,13 @@ class CLIPVisualLoss(torch.nn.Module):
         augment_list.append(
             transforms.RandomResizedCrop(im_res, scale=crop_scale, ratio=(1.0, 1.0))
         )
-        augment_list.append(
-            transforms.GaussianBlur(
-                kernel_size=21, sigma=(0.01, 2.0)
-            )  # Example: 5x5 kernel
-        )
+        if self.blur_sigma is not None:
+            augment_list.append(
+                transforms.GaussianBlur(
+                    kernel_size=self.blur_kernel,
+                    sigma=self.blur_sigma,
+                )  # Example: 5x5 kernel
+            )
         augment_list.append(self.clip_norm_)  # CLIP Normalize
         # compose augmentations
         augment_compose = transforms.Compose(augment_list)
