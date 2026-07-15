@@ -37,11 +37,13 @@ c.stroke_weight(2.0)
 c.polyline([[50, 50], [200, 50], [200, 200], [50, 200]], close=True)
 
 # Render the scene (differentiable, img contains the resulting tensor)
-img = c.render() # Returns tensor
+img = c.render() # Returnsaa a tensor with the rendered image
 c.get_image()
 ``` 
 
-The corresponding DiffVG scene is cleared when `background` is called (think of it as a `begin`) and then re-constructed each time as drawing commands are called. Calling `render` rasterizes the scene while allowing gradient propagation to any parameter used in the drawing procedures.
+Calling `render` rasterizes the scene while allowing gradient propagation to any parameter used in the drawing procedures. By default, this operation also clears the DiffVG primitives that have been constructed during the previous drawing calls, so that subsequent sequences of commands dynamically rebuild the scene.
+
+
 
 A typical optimization loop, involves re-drawing the scene at each step and using the otuput of `render` to compute some loss function with respect to the rendered image.
 
@@ -170,8 +172,8 @@ After rendering, the result is stored in `canvas.img`. Retrieve it as a PIL imag
 | `scale(sx, sy)` | Apply scaling. |
 | `identity()` / `reset_matrix()` | Reset the current transformation to identity. |
 | `angle_mode(mode)` | Set angle mode: `'radians'` or `'degrees'`. |
-| `rect_mode(mode)` | (future) Set rectangle drawing mode. |
-| `ellipse_mode(mode)` | (future) Set ellipse drawing mode. |
+| `rect_mode(mode)` | Set rectangle drawing mode: `'corner'`, `'corners'`, `'center'`, `'radius'`. |
+| `ellipse_mode(mode)` | Set ellipse drawing mode: `'corner'`, `'center'`, `'radius'`, `'corners'`. |
 | `fill_rule(rule)` | Set fill rule: `'evenodd'`, `'nonzero'`, `'winding'`. |
 | `curve_tightness(val)` | Set tension for cardinal splines (0‑1, default 0.5). |
 
@@ -191,6 +193,11 @@ After rendering, the result is stored in `canvas.img`. Retrieve it as a PIL imag
 | `triangle(a, b, c)` | Draw a triangle from three points. |
 | `quad(a, b, c, d)` | Draw a quadrilateral from four points. |
 
+| `background(*args)` | Clear the canvas with a color and begin a new scene. |
+| `no_fill()` | Disable fill for subsequent shapes. |
+| `no_stroke()` | Disable stroke for subsequent shapes. |
+| `var(value, group_name, grad=True)= | Create/cache an optimization variable tensor. |
+| =get_vars(group_name)= / =vars(group_name)= | Retrieve cached variables for a group. |
 ### Complex Shapes
 
 Build shapes piece by piece, similar to Processing’s `beginShape()` / `endShape()`:
@@ -225,3 +232,26 @@ canvas.shape(s)
 Calling `canvas.shape(s)` multiple times will instance the same geometry with the current transformation, reusing the underlying `pydiffvg` paths.
 
 
+### Optimization Helpers
+
+`CanvasOptimizer` wraps a `DiffCanvas` and manages the optimization loop.
+Subclass it and override `draw`, `setup`, `loss`
+
+```
+class MyOpt(CanvasOptimizer):
+    def draw(self, c):
+        c.background(1.0)
+        # ... build scene ...
+        return c.render()
+
+    def setup(self, c):
+        self.optimizers = [torch.optim.Adam(c.get_vars('pts'), lr=1.0)]
+
+    def loss(self, img):
+        return (img.mean(-1) - target).abs().mean()
+
+opt = MyOpt(w, h, num_opt_steps=300)
+opt.run()
+for _ in range(opt.num_opt_steps):
+    opt.step()
+```

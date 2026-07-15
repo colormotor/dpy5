@@ -134,7 +134,6 @@ class DiffCanvas:
     def reset(self):
         self.items = []
         self.mat_stack = [torch.eye(3, device=self.device, dtype=self.dtype)]
-        self.building = False
 
         # Keep track of draw states
         self.draw_states = [CanvasState(self)]
@@ -153,21 +152,21 @@ class DiffCanvas:
         # Reset counter for auto var id
         self._var_counters = defaultdict(int)
 
-    def begin(self):
-        @contextmanager
-        def popmanager():
-            pass
-            try:
-                yield
-            finally:
-                self.end()
+    # def begin(self):
+    #     @contextmanager
+    #     def popmanager():
+    #         pass
+    #         try:
+    #             yield
+    #         finally:
+    #             self.end()
 
-        self.reset()
-        self.building = True
-        return popmanager()
+    #     self.reset()
+    #     self.building = True
+    #     return popmanager()
 
-    def end(self):
-        self.building = False
+    # def end(self):
+    #     self.building = False
 
     def push_matrix(self):
         """
@@ -408,17 +407,19 @@ class DiffCanvas:
             return self._vec(*args)
         raise ValueError("Invalid arg combination")
 
-    def background(self, *args):
+    def background(self, *args, reset=True):
         """Clear the canvas with a given color
         Accepts either a tensor with the color components, or single color components (as in `fill`)
-        Currently no alpha
+
+        Note that by default this resets the scene (`reset=True`) so any primitive preceding background will be effectively lost during rendering.
         """
 
         if not len(args):
             raise ValueError("background requires at least one argument")
 
         # Background clears so we may as well begin
-        self.begin()
+        if reset:
+            self.reset()
 
         if args[0] is None:
             self._bg = None
@@ -996,16 +997,17 @@ class DiffCanvas:
 
         self.polyline(torch.vstack([a, b]))
 
-    def render(self, prefiltering=False, num_samples=2, seed=0, sdf=False):
+    def render(
+        self, prefiltering=False, num_samples=2, seed=0, sdf=False, auto_reset=True
+    ):
         """Render the canvas output
 
         Arguments:
         - `prefiltering`: if `True`, uses an anti‑aliasing prefilter. Produces crisper lines, but does not support variable width strokes and produces artefacts in some cases.
         - `num_samples`: number of x and y samples for Montecarlo boundary sampling in DiffVG.
         - `sdf`: if `True`, outputs a signed distance field.
+        - `autoreset`: if `True` (default) the DiffVG scene is reset after rendering, so that the next draw calls rebuild it
         """
-        self.building = False
-
         if prefiltering:
             num_samples = 1
 
@@ -1045,6 +1047,9 @@ class DiffCanvas:
             img = img[:, :, :3]
 
         self.img = img
+
+        if auto_reset:
+            self.reset()
         return img
 
     def get_image(self):
