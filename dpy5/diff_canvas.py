@@ -128,6 +128,7 @@ class DiffCanvas:
         self._width = width
         self._height = height
         self._bg = None
+        self.img = None
         self.clear_vars()
         self.reset()
 
@@ -147,8 +148,7 @@ class DiffCanvas:
         # Cache for shapes that can be instanced
         # Gives corresponding indices in primitive list
         self.shape_to_inds = {}
-        self.img = None
-
+        
         # Reset counter for auto var id
         self._var_counters = defaultdict(int)
 

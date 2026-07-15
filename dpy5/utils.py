@@ -74,6 +74,8 @@ class CanvasOptimizer:
         self.verbose = verbose
         self.init(self.c)
         self.img = self.draw(self.c)
+        if self.img is None: # If user forgets to return img
+            self.img = self.c.img
 
     ######################################
     # Functions for user to override
@@ -116,6 +118,9 @@ class CanvasOptimizer:
             opt.zero_grad()
 
         img = self.draw(self.c)
+        if img is None: # If user forgets to return img
+            img = self.c.img
+
         self.img = img
 
         if self.epoch >= self.num_opt_steps:
