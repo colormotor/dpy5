@@ -17,6 +17,12 @@ Install locally by cloning this repository and then
 pip install -e .
 ```
 
+### Intall from pyPi
+Note that this will not install diffvg and the library is new and potentially has bugs. So the PyPi package may not include the latest fixes: 
+```
+pip install dpy5
+```
+
 ## Quick Start
 
 ```python
@@ -35,18 +41,24 @@ img = c.render() # Returns tensor
 c.get_image()
 ``` 
 
-The corresponding DiffVG scene is cleared when `background` is called (think of it as a `begin`) and then re-constructed each time as drawing commands are called. Calling `render` at the end rasterizes the scene while allowing gradient propagation to any parameter used in the drawing procedures.
+The corresponding DiffVG scene is cleared when `background` is called (think of it as a `begin`) and then re-constructed each time as drawing commands are called. Calling `render` rasterizes the scene while allowing gradient propagation to any parameter used in the drawing procedures.
 
 A typical optimization loop, involves re-drawing the scene at each step and using the otuput of `render` to compute some loss function with respect to the rendered image.
 
-### Optimization example
-All drawing functions accept python sequences (e.g. lists, tuples, numpy arrays or pytorch tensors). Passing arguments as tensors with gradients enabled (`requires_grad=True`) will enable gradient propagation to the arguments. While doing so explictly is possible (e.g. `c.polyline(some_tensor)`), the API allows you to do so more concisely by using the `c.var(value, group_name)` syntax. 
+### Optimization
 
-This method returns a PyTorch tensor with `requires_grad=True` and providing a `group_name` caches the tensor so it can be retrieved later with `c.get_vars(group_name)` and passed on to an optimizer of choice. The values passed in to `c.var` will be used as initial values for the tensor, but in subsequent calls to the drawing sequence `DiffCanvas` will use the cached tensors instead of creating new ones, as long as the same variable creation order is maintained.
+All drawing functions accept python sequences (e.g. lists, tuples, numpy arrays or pytorch tensors). Passing arguments as tensors with gradients enabled (`requires_grad=True`) will enable gradient propagation to the correponding variable. While you can do so explictly (e.g. `c.polyline(some_tensor_with_grad)`), the API allows you to do so more concisely by using the `c.var(value, group_name)` syntax. 
+
+#### Optimization variables
+The `var` method returns a PyTorch tensor with `requires_grad=True` and providing the second `group_name` argument will cache the tensor so it can be retrieved later together with all the tensors with the same group using `c.get_vars(group_name)`. 
+
+The values passed into `c.var` will be used to initialize the tensor, but subsequent calls to the drawing sequence will use the cached tensor instead of re-creating new ones, as long as the same variable creation order is maintained.
 
 > **Note:** while this caching method saves typing, it expects the drawing order and tensor sizes to remain unchanged for each step of the optimization. 
 
-Here is a simple example of an optimization loop that adapts a series of curves to minimize the L1 error with a target image and displays the results:
+#### Example
+
+The following is an example that adapts a series of curves to minimize the L1 error with a target image and displays the results:
 
 ``` python
 import os
