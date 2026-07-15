@@ -1,4 +1,4 @@
-"""
+r"""
  _____              _____ 
 |  __ \            | ____|
 | |  | |_ __  _   _| |__  
@@ -22,6 +22,7 @@ from contextlib import contextmanager
 import pydiffvg
 import copy, time
 from PIL import Image
+import math
 
 use_gpu = torch.cuda.is_available()
 print("Using gpu: ", use_gpu)
@@ -129,8 +130,21 @@ class DiffCanvas:
         self._height = height
         self._bg = None
         self.img = None
+
+        self.primitives = []
+        self.groups = []
+        # Store rendering data since this will be cleared
+        self.rendered_primitives = []
+        self.rendered_groups = []
+
         self.clear_vars()
         self.reset()
+
+    def get_scene(self):
+        if not self.primitives:
+            # This is the case when rendering has occurred
+            return self.rendered_groups, self.rendered_primitives
+        return self.groups, self.primitives
 
     def reset(self):
         self.items = []
@@ -148,7 +162,7 @@ class DiffCanvas:
         # Cache for shapes that can be instanced
         # Gives corresponding indices in primitive list
         self.shape_to_inds = {}
-        
+
         # Reset counter for auto var id
         self._var_counters = defaultdict(int)
 
@@ -430,6 +444,7 @@ class DiffCanvas:
             self.height, self.width, 3, dtype=torch.float32, device=self.device
         )
         self._bg[...] = torch.as_tensor(clr).to(self.dtype).to(self.device)
+        self._bg_color = clr
         return self
 
     def fill(self, *args):
@@ -936,7 +951,7 @@ class DiffCanvas:
             center = center + size
 
         prim = pydiffvg.Circle(
-            radius=size / 2, center=center, stroke_width=self._to(self._line_width)
+            radius=size, center=center, stroke_width=self._to(self._line_width)
         )
         self._add_primitives([prim])
 
@@ -1020,15 +1035,19 @@ class DiffCanvas:
         else:
             w, h = self.width, self.height
 
-        if not self.primitives:
+        # Get current groups and primitives.
+        # This will return the stored scene structure if rendering has already occurred
+        groups, primitives = self.get_scene()
+        if not primitives:
+            print("No primitives to render")
             self.img = bg
             return self.img
 
         scene_args = pydiffvg.RenderFunction.serialize_scene(
             w,
             h,
-            self.primitives,
-            self.groups,
+            primitives,
+            groups,
             use_prefiltering=prefiltering,
             output_type=pydiffvg.OutputType.sdf if sdf else pydiffvg.OutputType.color,
         )
@@ -1047,6 +1066,10 @@ class DiffCanvas:
             img = img[:, :, :3]
 
         self.img = img
+
+        # Stored for later use
+        self.rendered_groups = groups
+        self.rendered_primitives = primitives
 
         if auto_reset:
             self.reset()
@@ -1134,30 +1157,60 @@ class DiffCanvas:
 
         c = Canvas(self.width, self.height, save_background=save_background)
         c.color_mode("rgb", 1.0)
+        if self._bg is not None:
+            c.background(*npy(self._bg_color))
 
-        if thick:
-            c.no_stroke()
-            c.fill(0)
-        else:
-            c.stroke(0)
-            c.no_fill()
+        def check_degree(prim, degree):
+            ctrl = npy(prim.num_control_points)
+            return np.all(ctrl == degree - 1)
 
-        for g in self.groups:
+        groups, primitives = self.get_scene()
+        for g in groups:
+            c.fill(g.fill_color)
+            c.stroke(g.stroke_color)
+
             with c.push_matrix():
                 c.apply_matrix(npy(g.shape_to_canvas))
                 for i in npy(g.shape_ids):
-                    prim = self.primitives[i]
+                    prim = primitives[i]
                     if isinstance(prim, pydiffvg.Path):
                         Cp = npy(prim.points)
-                        if prim.degree == 3:
-                            c.multibezier(Cp, close=prim.is_closed)
-                        elif prim.degree == 1:
-                            c.polyline(Cp)
+                        w = prim.stroke_width
+                        if w is None or is_number(w):  # Fixed width
+                            c.stroke_weight(w)
+                            if check_degree(prim, 3):
+                                c.multibezier(Cp, close=prim.is_closed)
+                            elif check_degree(prim, 1):
+                                c.polyline(Cp)
+                            else:
+                                raise ValueError(
+                                    "Mixed degrees or degrees other than 1 and 3 not supported yet for canvas conversion"
+                                )
                         else:
-                            raise ValueError(
-                                "Degrees other than 1 and 3 not supported yet"
-                            )
+                            if not check_degree(prim, 3):
+                                raise ValueError(
+                                    "Variable thickness is currently only supported for cubic curves"
+                                )
+                            Pw = np.column_stack([Cp, w])
+                            with c.push():
+                                c.no_stroke()
+                                c.stroke(1, 0, 0)
+                                c.fill(g.stroke_color)
+                                L, R = thick_bezier_envelope(Pw)
+                                R = R[::-1]
+                                c.begin_shape()
+                                c.multibezier(L)
+                                c.multibezier(R)
+                                c.end_shape(close=True)
+                                c.circle(R[0], 8)
 
+                    elif isinstance(prim, pydiffvg.Circle):
+                        c.stroke_weight(prim.stroke_width)
+                        c.circle(npy(prim.center), npy(prim.radius))
+                    elif isinstance(prim, pydiffvg.Rect):
+                        c.stroke_weight(prim.stroke_width)
+                        size = npy(prim.p_max - prim.p_min)
+                        p = pi
         return c
 
 

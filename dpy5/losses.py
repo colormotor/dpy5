@@ -1,4 +1,19 @@
-#!/usr/bin/env python3
+r"""
+ _____              _____ 
+|  __ \            | ____|
+| |  | |_ __  _   _| |__  
+| |  | | '_ \| | | |___ \ 
+| |__| | |_) | |_| |___) |
+|_____/| .__/ \__, |____/ 
+       | |     __/ |      
+       |_|    |___/
+
+Processing-like API for DiffVG
+© Daniel Berio (@colormotor) 2026 - ...
+
+Some image loss functions
+"""
+
 import torch
 from torchvision import transforms
 import numpy as np
