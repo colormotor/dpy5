@@ -964,7 +964,7 @@ class DiffCanvas:
 
         group = pydiffvg.ShapeGroup(
             shape_ids=torch.as_tensor(shape_ids).to(torch.int64).to(self.device),
-            use_even_odd_rule=False,  # self._fill_rule=='evenodd', #evenodd',
+            use_even_odd_rule=self._fill_rule == "evenodd",  # evenodd',
             fill_color=fill_color,
             stroke_color=stroke_color,
         )
@@ -1226,8 +1226,9 @@ class Shape:
             x = torch.as_tensor(args[0])
         self._start_contour_if_needed()
         self._flush_spline()
+        if self._contour:
+            self._num_ctrl += [0]
         self._contour.append(x)
-        self._num_ctrl += [0]
 
     def curve_vertex(self, *args):
         """Add a curved vertex (Catmull Rom spline)."""
@@ -1239,7 +1240,7 @@ class Shape:
 
         self._start_contour_if_needed()
         if not self._curve_points:
-            if self._contour and self._num_ctrl[-1] == 0:
+            if self._contour and (not self._num_ctrl or self._num_ctrl[-1] == 0):
                 self._spline_start = self._contour[-1][-1].clone()
             else:
                 self._spline_start = None
