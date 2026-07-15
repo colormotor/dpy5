@@ -27,18 +27,20 @@ use_gpu = torch.cuda.is_available()
 print("Using gpu: ", use_gpu)
 pydiffvg.set_use_gpu(use_gpu)
 
+npy = lambda v: v.detach().cpu().numpy()
+
 
 def make_mat(M, device, dtype):
     return torch.vstack(
         [
-            torch.stack([torch.as_tensor(v).to(dtype).to(device) for v in row])
+            torch.stack([torch.as_tensor(v, dtype=dtype, device=device) for v in row])
             for row in M
         ]
     )
 
 
 def make_vec(*args, device, dtype):
-    return torch.stack([torch.as_tensor(v).to(dtype).to(device) for v in args])
+    return torch.stack([torch.as_tensor(v, dtype=dtype, device=device) for v in args])
 
 
 def is_number(x):
@@ -104,7 +106,6 @@ def draw_states_properties(*names):
     "_fill_rule",
     "_tension",
 )
-
 class DiffCanvas:
     """
     A differentiable 2D vector graphics canvas based on DiffVG, using a Processing-like syntax.
@@ -253,7 +254,9 @@ class DiffCanvas:
 
     def to(self, v):
         """Converts a value or tensor to the appropriate dtype and device"""
-        return torch.as_tensor(v).to(self.dtype).to(self.device)
+        return torch.as_tensor(
+            v, dtype=self.dtype, device=self.device
+        )  # .to(self.dtype).to(self.device)
 
     _to = to
 
@@ -402,7 +405,7 @@ class DiffCanvas:
         elif len(args) == 3:
             return self._vec(args[0], args[1], args[2], 1.0)
         elif len(args) == 4:
-            return self._vec(args)
+            return self._vec(*args)
         raise ValueError("Invalid arg combination")
 
     def background(self, *args):
@@ -754,16 +757,22 @@ class DiffCanvas:
         w, h = size
 
         if radius is None:
-            pts = self._mat(
-                [
-                    [x, y],
-                    [x + w, y],
-                    [x + w, y + h],
-                    [x, y + h],
-                ]
+            prim = pydiffvg.Rect(
+                p,
+                p + size,
+                stroke_width=self._to(self._line_width),
             )
+            self._add_primitives([prim])
+            # pts = self._mat(
+            #     [
+            #         [x, y],
+            #         [x + w, y],
+            #         [x + w, y + h],
+            #         [x, y + h],
+            #     ]
+            # )
 
-            self.polyline(pts, close=True)
+            # self.polyline(pts, close=True)
         else:
             r = torch.min(self._to(radius), torch.min(w, h) / 2)
             k = self._to(0.5522847498)
@@ -925,7 +934,12 @@ class DiffCanvas:
         if mode == "corner":
             center = center + size
 
-        self.ellipse(center, size, size, mode="center")
+        prim = pydiffvg.Circle(
+            radius=size / 2, center=center, stroke_width=self._to(self._line_width)
+        )
+        self._add_primitives([prim])
+
+        # self.ellipse(center, size, size, mode="center")
         return self
 
     ###############################################
@@ -1109,6 +1123,37 @@ class DiffCanvas:
 
     def _var_id(self, name, id):
         return f"{name}_{id}"
+
+    def to_canvas(self, save_background=True):
+        from py5canvas import Canvas
+
+        c = Canvas(self.width, self.height, save_background=save_background)
+        c.color_mode("rgb", 1.0)
+
+        if thick:
+            c.no_stroke()
+            c.fill(0)
+        else:
+            c.stroke(0)
+            c.no_fill()
+
+        for g in self.groups:
+            with c.push_matrix():
+                c.apply_matrix(npy(g.shape_to_canvas))
+                for i in npy(g.shape_ids):
+                    prim = self.primitives[i]
+                    if isinstance(prim, pydiffvg.Path):
+                        Cp = npy(prim.points)
+                        if prim.degree == 3:
+                            c.multibezier(Cp, close=prim.is_closed)
+                        elif prim.degree == 1:
+                            c.polyline(Cp)
+                        else:
+                            raise ValueError(
+                                "Degrees other than 1 and 3 not supported yet"
+                            )
+
+        return c
 
 
 class Shape:
@@ -1312,15 +1357,15 @@ class Shape:
         for ctr in self.contours:
             if isinstance(ctr, tuple):
                 pts, nctrl, closed = ctr
-                pts = pts.to(c.dtype).to(c.device)
+                pts = pts.to(dtype=c.dtype, device=c.device)
                 if pts.shape[1] > 2:
                     w = pts[:, 2].contiguous()
                     pts = pts[:, :2].contiguous()
                 else:
-                    w = torch.as_tensor(c._line_width).to(c.device)
+                    w = torch.as_tensor(c._line_width, device=c.device)
 
                 path = pydiffvg.Path(
-                    num_control_points=nctrl.to(c.device),
+                    num_control_points=nctrl.to(device=c.device),
                     points=pts,
                     stroke_width=w,
                     is_closed=closed,
@@ -1368,6 +1413,50 @@ def cardinal_spline(Q, c, closed=False):
     return torch.vstack(P)
 
 
+# Bot vectorization
+def cardinal_spline(Q, c, closed=False):
+    """Vectorized cardinal spline interpolation for a torch tensor of points.
+
+    Q: (n, d) tensor of n points (d>=1).
+    Returns the cubic Bezier control points (3n-2 for open, 3n for closed).
+    """
+    n = Q.shape[0]
+    t = 1.0 - c
+
+    if closed:
+        # D[k] = t * (Q[k+1] - Q[k-1]) with periodic wraparound
+        D = t * (torch.roll(Q, -1, 0) - torch.roll(Q, 1, 0))
+        starts = Q
+        ends = torch.roll(Q, -1, 0)
+        D_starts = D
+        D_ends = torch.roll(D, -1, 0)
+        n_seg = n
+    else:
+        D = torch.empty_like(Q)
+        if n > 2:
+            D[1:-1] = t * (Q[2:] - Q[:-2])
+        D[0] = t * (Q[1] - Q[0])
+        D[-1] = t * (Q[-1] - Q[-2])
+        starts = Q[:-1]
+        ends = Q[1:]
+        D_starts = D[:-1]
+        D_ends = D[1:]
+        n_seg = n - 1
+
+    # Two intermediate Bezier handles per segment, plus the segment endpoint.
+    c1 = starts + D_starts / 3.0
+    c2 = ends - D_ends / 3.0
+
+    # Interleave: [Q[0], c1[0], c2[0], ends[0], c1[1], c2[1], ends[1], ...]
+    P = torch.empty((1 + 3 * n_seg, *Q.shape[1:]), dtype=Q.dtype, device=Q.device)
+    P[0] = Q[0]
+    P[1:] = torch.stack([c1, c2, ends], dim=1).reshape(-1, *Q.shape[1:])
+
+    if closed:
+        P = P[:-1]  # drop the duplicated closing point
+    return P
+
+
 def is_compound(S):
     """Returns True if S is a compound polyline,
     a polyline is represented as a list of points, or a ndarray/tensor with as many rows as points"""
@@ -1388,6 +1477,145 @@ def is_compound(S):
     ) > 1:
         return True
     return False
+
+
+def split_cubic(bez, t):
+    p1, p2, p3, p4 = bez
+    p12 = (p2 - p1) * t + p1
+    p23 = (p3 - p2) * t + p2
+    p34 = (p4 - p3) * t + p3
+    p123 = (p23 - p12) * t + p12
+    p234 = (p34 - p23) * t + p23
+    p1234 = (p234 - p123) * t + p123
+    return np.vstack([p1, p12, p123, p1234]), np.vstack([p1234, p234, p34, p4])
+
+
+def beziers_to_chain(beziers):
+    n = len(beziers)
+    chain = []
+    for i in range(n):
+        chain.append(list(beziers[i][:-1]))
+    chain.append([beziers[-1][-1]])
+    return torch.vstack(sum(chain, []))
+
+
+def chain_to_beziers(chain, degree=3):
+    """Convert Bezier chain to list of curve segments (4 control points each)"""
+    num = num_bezier(chain.shape[0], degree)
+    beziers = []
+    for i in range(num):
+        beziers.append(chain[i * degree : i * degree + degree + 1, :])
+    return beziers
+
+
+def beziers_to_chain(beziers):
+    """Convert list of Bezier curve segments to a piecewise bezier chain (shares vertices)"""
+    n = len(beziers)
+    chain = []
+    for i in range(n):
+        chain.append(list(beziers[i][:-1]))
+    chain.append([beziers[-1][-1]])
+    return np.array(sum(chain, []))
+
+
+def tangent_angle(bez):
+    d0 = bez[1, :2] - bez[0, :2]
+    d1 = bez[3, :2] - bez[2, :2]
+    d0 = d0 / (np.linalg.norm(d0) + 1e-8)
+    d1 = d1 / (np.linalg.norm(d1) + 1e-8)
+    c = np.clip(np.dot(d0, d1), -1.0, 1.0)
+    return np.arccos(c)
+
+
+def subdivide_adaptive_bezier(
+    bez,
+    thresh,
+    depth,
+    max_depth,
+):
+    if depth >= max_depth:
+        return [bez]
+
+    if not tangent_angle(bez) > thresh:
+        return [bez]
+
+    left, right = split_cubic(bez, 0.5)
+
+    return subdivide_adaptive_bezier(
+        left,
+        thresh,
+        depth + 1,
+        max_depth,
+    ) + subdivide_adaptive_bezier(
+        right,
+        thresh,
+        depth + 1,
+        max_depth,
+    )
+
+
+def bezier_mat(p, t, deriv=0):
+    n = p + 1
+    if deriv > 0:
+        return np.diff(np.eye(n), 1) @ bezier_mat(p - 1, t, deriv - 1)
+    B = np.vstack([bernstein(p, i)(t) for i in range(n)])
+    return B
+
+
+def bernstein(n, i):
+    bi = math.comb(n, i)  # binom(n, i)
+    return lambda t, bi=bi, n=n, i=i: bi * t**i * (1 - t) ** (n - i)
+
+
+def bezier(P, t, d=0):
+    """Bezier curve of degree len(P)-1. d is the derivative order (0 gives positions)"""
+    n = P.shape[0] - 1
+    if d > 0:
+        Q = np.diff(P, axis=0) * n
+        return bezier(Q, t, d - 1)
+    B = np.vstack([bernstein(n, i)(t) for i, p in enumerate(P)])
+    return (P.T @ B).T
+
+
+def num_bezier(n_ctrl, degree=3):
+    if type(n_ctrl) == np.ndarray:
+        n_ctrl = len(n_ctrl)
+    return int((n_ctrl - 1) / degree)
+
+
+def thick_bezier_envelope(Cp, subd_thresh=50):
+    """Approximate envelope of a Bezier chain with varying width
+    Subdivides the segments based depending on tangent angle
+    and offsets along uniformly sampled normals.
+    Will under-estimate the offset for high curvature segments but works
+    reasonably ok with Beziers derived from splines
+    """
+    from numpy.linalg import norm
+
+    if Cp.shape[1] < 3:
+        raise ValueError("Each control point should have radius!")
+    beziers = chain_to_beziers(Cp)
+
+    subd = []
+    thresh = np.radians(subd_thresh)
+    for bez in beziers:
+        subd.extend(subdivide_adaptive_bezier(bez, thresh, 0, 5))
+    beziers = subd
+
+    L, R = [], []
+    t = np.linspace(0, 1, 4)
+    for bez in beziers:
+        Pr = bezier(bez, t)  # uniform samples
+        P = bez[:, :2]  # Offset control points
+        r = Pr[:, 2:]  # Use radius samples for offset
+        # tangents and normals
+        D = bezier(bez[:, :2], t, d=1)
+        N = np.vstack([-D[:, 1], D[:, 0]]).T
+        N = N / np.linalg.norm(N, axis=1, keepdims=True)
+        offset = r * N
+        L.append(P - offset)
+        R.append(P + offset)
+    return beziers_to_chain(L), beziers_to_chain(R)
 
 
 def num_bezier(n_ctrl, closed=False, degree=3):
