@@ -1152,7 +1152,7 @@ class DiffCanvas:
     def _var_id(self, name, id):
         return f"{name}_{id}"
 
-    def to_canvas(self, save_background=True):
+    def to_canvas(self, save_background=False):
         from py5canvas import Canvas
 
         c = Canvas(self.width, self.height, save_background=save_background)
