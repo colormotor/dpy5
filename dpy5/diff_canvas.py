@@ -20,7 +20,7 @@ import numpy as np
 from collections import defaultdict
 from contextlib import contextmanager
 import pydiffvg
-import copy, time
+import copy
 from PIL import Image
 import math
 
@@ -28,7 +28,9 @@ use_gpu = torch.cuda.is_available()
 print("Using gpu: ", use_gpu)
 pydiffvg.set_use_gpu(use_gpu)
 
-npy = lambda v: v.detach().cpu().numpy()
+
+def npy(v):
+    return v.detach().cpu().numpy()
 
 
 def make_mat(M, device, dtype):
@@ -97,6 +99,7 @@ def draw_states_properties(*names):
 
 
 # Style properties, automatically adds setters and getters
+# using the decorator above
 @draw_states_properties(
     "cur_fill",
     "cur_stroke",
@@ -109,13 +112,28 @@ def draw_states_properties(*names):
 )
 class DiffCanvas:
     """
-    A differentiable 2D vector graphics canvas based on DiffVG, using a Processing-like syntax.
-    It provides an imperative drawing API similar to Processing/p5
-    (e.g. `background`, `fill`, `stroke`, `push`, `pop`, `translate`, `rotate`,
-    `scale`, `line`, `rect`, `ellipse`, `begin_shape` / `end_shape`) while
-    building a scene using DiffVG.  All geometric and style parameters
-    are PyTorch tensors, so gradients flow through `render()` and the resulting
-    image can be optimized with gradient descent.
+    A Prcessing-like API for 2D differentiable vector graphics rasterization using DiffVG.
+    It provides an imperative "immediate-mode" drawing API similar to Processing
+    while building a scene using DiffVG.  All drawing and styling operations are differentiable,
+    meaning tht gradients can propagate back through rendering and to the parameters used to draw primitives.
+
+    To use, you can instantiate a `DiffCanvas` with the desired size and draw using functions such as
+    `background`, `fill`, `stroke`, `push`, `pop`, `translate`, `rotate` `scale`, `line`, `rect`, `ellipse`, etc..
+
+    A minimal example:
+    ```python
+    c = dc.DiffCanvas(300, 300)
+    c.background(0.5)
+    c.translate(c.center)
+    c.circle([0, 0], 100)
+    rendered_tensor = c.render()
+    ```
+
+    Most `DiffCanvas` method arguments and parameters are converted internally to torch tensors.
+    This conversion is automatic so methods usually accept any kind of sequence
+    (e.g. `c.translate([0, 0])`, `c.translate(torch.zeros(2))`, or `c.translate(np.zeros(2))` will all work identically.
+
+    While Processing/P5js use colors expressed in the `[0,255]` range by default, `DiffCanvas` colors are expressed in the `[0,1]` range.
     """
 
     def __init__(self, width, height, device=None):
@@ -140,12 +158,6 @@ class DiffCanvas:
         self.clear_vars()
         self.reset()
 
-    def get_scene(self):
-        if not self.primitives:
-            # This is the case when rendering has occurred
-            return self.rendered_groups, self.rendered_primitives
-        return self.groups, self.primitives
-
     def reset(self):
         self.items = []
         self.mat_stack = [torch.eye(3, device=self.device, dtype=self.dtype)]
@@ -166,25 +178,24 @@ class DiffCanvas:
         # Reset counter for auto var id
         self._var_counters = defaultdict(int)
 
-    # def begin(self):
-    #     @contextmanager
-    #     def popmanager():
-    #         pass
-    #         try:
-    #             yield
-    #         finally:
-    #             self.end()
-
-    #     self.reset()
-    #     self.building = True
-    #     return popmanager()
-
-    # def end(self):
-    #     self.building = False
-
     def push_matrix(self):
         """
-        Save the current transformation
+        Save the current transformation.
+        Can be used paired with `pop_matrix()`:
+        ```python
+        c.push_matrix()
+        # Trasform and draw within pair
+        ...
+        c.pop_matrix()
+        ```
+
+        or (safer) using `with`:
+        ```python
+        with c,push_matrix():
+            # Transform and draw inside block
+            ...
+        ```
+
         """
 
         @contextmanager
@@ -384,7 +395,7 @@ class DiffCanvas:
 
     def angle_mode(self, mode):
         mode = mode.lower()
-        if not mode in ["degrees", "radians"]:
+        if mode not in ["degrees", "radians"]:
             raise ValueError("invalid angle mode, use either RADIANS or DEGREES")
         self._angle_mode = mode
         return self
@@ -961,6 +972,13 @@ class DiffCanvas:
     ###############################################
     # Scene management
 
+    def get_scene(self):
+        """Return groups and primitives for the DiffVG scene resulting from the drawing command sequence"""
+        if not self.primitives:
+            # This is the case when rendering has occurred
+            return self.rendered_groups, self.rendered_primitives
+        return self.groups, self.primitives
+
     def _add_primitives(self, primitives):
         """Add new primitives for rendering"""
         ind = len(self.primitives)
@@ -1015,7 +1033,7 @@ class DiffCanvas:
     def render(
         self, prefiltering=False, num_samples=2, seed=0, sdf=False, auto_reset=True
     ):
-        """Render the canvas output
+        """Renders the canvas into a torch tensor and returns it.
 
         Arguments:
         - `prefiltering`: if `True`, uses an anti‑aliasing prefilter. Produces crisper lines, but does not support variable width strokes and produces artefacts in some cases.
@@ -1035,8 +1053,9 @@ class DiffCanvas:
         else:
             w, h = self.width, self.height
 
-        # Get current groups and primitives.
-        # This will return the stored scene structure if rendering has already occurred
+        # Get current DiffVG groups and primitives.
+        # These will be the ones just constructed with the preceding drawing calls,
+        # Or the latest rendered ones if rendering has already ocurred
         groups, primitives = self.get_scene()
         if not primitives:
             print("No primitives to render")
@@ -1060,17 +1079,18 @@ class DiffCanvas:
             print("Possibly wrong dtype in geometry, needs to be float32")
             raise (e)
 
-        if self._bg is not None:
+        if self._bg is not None and not sdf:
             img = img[:, :, 3:4] * img[:, :, :3] + bg * (1 - img[:, :, 3:4])
             # Convert to RGB only with background otherwise keep alpha
             img = img[:, :, :3]
 
         self.img = img
 
-        # Stored for later use
+        # Stored for later use...
         self.rendered_groups = groups
         self.rendered_primitives = primitives
-
+        # ...because by default render clears all primitives,
+        # making it easier to iterate a sequence of drawing commands during optimization
         if auto_reset:
             self.reset()
         return img
@@ -1649,7 +1669,6 @@ def thick_bezier_envelope(Cp, subd_thresh=50):
     Will under-estimate the offset for high curvature segments but works
     reasonably ok with Beziers derived from splines
     """
-    from numpy.linalg import norm
 
     if Cp.shape[1] < 3:
         raise ValueError("Each control point should have radius!")

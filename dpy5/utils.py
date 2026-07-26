@@ -25,9 +25,14 @@ from PIL import Image
 
 class CanvasOptimizer:
     """Helper for optimization loops. Wraps a `DiffCanvas` instance
-    and provides callbacks for initialization (`init`), setting up optimizers (`setup`),
-    drawing (`draw`) loss computation (`loss`) and clipping values or other post processing oparations (`postprocess`).
-    To use this, subclass `CanvasOptimizer` with a class that overrides these methods, and then call `step` in a loop.
+    and provides entry points for:
+    - initialization (`init`, optional)
+    - setting up optimizers (`setup`)
+    - drawing at each iteration (`draw`)
+    - loss computation (`loss`)
+    - clipping values or other post processing oparations (`postprocess`, optional).
+
+    Subclass `CanvasOptimizer` and override these methods, and then simply call `step` at each iteration:
 
     E.g.:
 
@@ -50,7 +55,7 @@ class CanvasOptimizer:
 
         def setup(self, c):
             self.optimizers = [
-                                torch.optim.Adam(c.get_vars('some variables'), lr=1.0),
+               torch.optim.Adam(c.get_vars('some variables'), lr=1.0),
             ]
             # optionally add schedulers to `self.schedulers`
 
@@ -60,7 +65,7 @@ class CanvasOptimizer:
             loss = ...
             return loss
 
-        opt = MyCanvasOpt(w, h)
+    opt = MyCanvasOpt(w, h)
     ```
     """
 
@@ -74,7 +79,7 @@ class CanvasOptimizer:
         self.verbose = verbose
         self.init(self.c)
         self.img = self.draw(self.c)
-        if self.img is None: # If user forgets to return img
+        if self.img is None:  # If user forgets to return img
             self.img = self.c.img
 
     ######################################
@@ -118,7 +123,7 @@ class CanvasOptimizer:
             opt.zero_grad()
 
         img = self.draw(self.c)
-        if img is None: # If user forgets to return img
+        if img is None:  # If user forgets to return img
             img = self.c.img
 
         self.img = img
