@@ -791,7 +791,7 @@ class DiffCanvas:
                 p_max=p + size,
                 stroke_width=self._to(self._line_width),
             )
-            self._add_primitives([prim]) # NOT WORKING ON MAC
+            self._add_primitives([prim])  # NOT WORKING ON MAC
             # pts = self._mat(
             #     [
             #         [x, y],
