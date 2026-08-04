@@ -36,7 +36,7 @@ def draw(c):
 
 
 # Initial image and target
-draw(c)
+img = draw(c)
 initial_img = c.get_image()
 target = c.to(np.array(target_img.convert("L")) / 255)
 

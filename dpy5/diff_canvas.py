@@ -19,6 +19,9 @@ import torch
 import numpy as np
 from collections import defaultdict
 from contextlib import contextmanager
+import dataclasses
+from dataclasses import dataclass
+
 import pydiffvg
 import copy
 from PIL import Image
@@ -26,7 +29,6 @@ import math
 
 use_gpu = torch.cuda.is_available()
 print("Using gpu: ", use_gpu)
-pydiffvg.set_use_gpu(use_gpu)
 
 
 def npy(v):
@@ -784,12 +786,12 @@ class DiffCanvas:
         w, h = size
 
         if radius is None:
-            prim = pydiffvg.Rect(
-                p,
-                p + size,
+            prim = Rect(
+                p_min=p,
+                p_max=p + size,
                 stroke_width=self._to(self._line_width),
             )
-            self._add_primitives([prim])
+            self._add_primitives([prim]) # NOT WORKING ON MAC
             # pts = self._mat(
             #     [
             #         [x, y],
@@ -961,7 +963,7 @@ class DiffCanvas:
         if mode == "corner":
             center = center + size
 
-        prim = pydiffvg.Circle(
+        prim = Circle(
             radius=size, center=center, stroke_width=self._to(self._line_width)
         )
         self._add_primitives([prim])
@@ -996,7 +998,7 @@ class DiffCanvas:
         if self.cur_stroke is not None:
             stroke_color = self.cur_stroke.to(self.device)
 
-        group = pydiffvg.ShapeGroup(
+        group = ShapeGroup(
             shape_ids=torch.as_tensor(shape_ids).to(torch.int64).to(self.device),
             use_even_odd_rule=self._fill_rule == "evenodd",  # evenodd',
             fill_color=fill_color,
@@ -1030,8 +1032,56 @@ class DiffCanvas:
 
         self.polyline(torch.vstack([a, b]))
 
+    def _render_diffvg(
+        self, w, h, groups, primitives, prefiltering, num_samples, seed=0, sdf=False
+    ):
+
+        def to_pydiffvg(obj):
+            cls = getattr(pydiffvg, type(obj).__name__)
+            kwargs = {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj)}
+            out = cls(**kwargs)
+            return out
+
+        # Convert to actual pydifgvg objects (easy cause of signature)
+        primitives = [to_pydiffvg(prim) for prim in primitives]
+        groups = [to_pydiffvg(group) for group in groups]
+
+        pydiffvg.set_use_gpu(use_gpu)
+
+        scene_args = pydiffvg.RenderFunction.serialize_scene(
+            w,
+            h,
+            primitives,
+            groups,
+            use_prefiltering=prefiltering,
+            output_type=pydiffvg.OutputType.sdf if sdf else pydiffvg.OutputType.color,
+        )
+
+        try:
+            img = pydiffvg.RenderFunction.apply(
+                w,
+                h,
+                num_samples,
+                num_samples,
+                seed,
+                None,
+                *scene_args,
+            )
+        except RuntimeError as e:
+            print("RUNTIME ERROR IN RENDER")
+            print("Possibly wrong dtype in geometry, needs to be float32")
+            raise (e)
+
+        return img
+
     def render(
-        self, prefiltering=False, num_samples=2, seed=0, sdf=False, auto_reset=True
+        self,
+        prefiltering=False,
+        num_samples=2,
+        seed=0,
+        sdf=False,
+        auto_reset=True,
+        renderer="diffvg",
     ):
         """Renders the canvas into a torch tensor and returns it.
 
@@ -1040,6 +1090,8 @@ class DiffCanvas:
         - `num_samples`: number of x and y samples for Montecarlo boundary sampling in DiffVG.
         - `sdf`: if `True`, outputs a signed distance field.
         - `autoreset`: if `True` (default) the DiffVG scene is reset after rendering, so that the next draw calls rebuild it
+        - `renderer`: a string (currently only `'diffvg'` is supported), or a function with signature
+           `renderer(w, h, groups, primitives, prefiltering=False, num_samples=2, seed=0, sdf=False)` returning a RGBA float32 tensor.
         """
         if prefiltering:
             num_samples = 1
@@ -1062,22 +1114,16 @@ class DiffCanvas:
             self.img = bg
             return self.img
 
-        scene_args = pydiffvg.RenderFunction.serialize_scene(
-            w,
-            h,
-            primitives,
-            groups,
-            use_prefiltering=prefiltering,
-            output_type=pydiffvg.OutputType.sdf if sdf else pydiffvg.OutputType.color,
-        )
-        try:
-            img = pydiffvg.RenderFunction.apply(
-                w, h, num_samples, num_samples, seed, None, *scene_args
-            )
-        except RuntimeError as e:
-            print("RUNTIME ERROR IN RENDER")
-            print("Possibly wrong dtype in geometry, needs to be float32")
-            raise (e)
+        if isinstance(renderer, str):
+            renderer = renderer.lower()
+            if renderer == "diffvg":
+                img = self._render_diffvg(
+                    w, h, groups, primitives, prefiltering, num_samples, sdf=sdf
+                )
+            else:
+                raise ValueError("Unsupported renderer: " + renderer)
+        else:
+            img = renderer(groups, primitives, prefiltering, num_samples, sdf=sdf)
 
         if self._bg is not None and not sdf:
             img = img[:, :, 3:4] * img[:, :, :3] + bg * (1 - img[:, :, 3:4])
@@ -1193,7 +1239,7 @@ class DiffCanvas:
                 c.apply_matrix(npy(g.shape_to_canvas))
                 for i in npy(g.shape_ids):
                     prim = primitives[i]
-                    if isinstance(prim, pydiffvg.Path):
+                    if isinstance(prim, Path):
                         Cp = npy(prim.points)
                         w = prim.stroke_width
                         if w is None or is_number(w):  # Fixed width
@@ -1224,10 +1270,10 @@ class DiffCanvas:
                                 c.end_shape(close=True)
                                 c.circle(R[0], 8)
 
-                    elif isinstance(prim, pydiffvg.Circle):
+                    elif isinstance(prim, Circle):
                         c.stroke_weight(prim.stroke_width)
                         c.circle(npy(prim.center), npy(prim.radius))
-                    elif isinstance(prim, pydiffvg.Rect):
+                    elif isinstance(prim, Rect):
                         c.stroke_weight(prim.stroke_width)
                         size = npy(prim.p_max - prim.p_min)
                         p = pi
@@ -1443,7 +1489,7 @@ class Shape:
                 else:
                     w = torch.as_tensor(c._line_width, device=c.device)
 
-                path = pydiffvg.Path(
+                path = Path(
                     num_control_points=nctrl.to(device=c.device),
                     points=pts,
                     stroke_width=w,
@@ -1457,39 +1503,39 @@ class Shape:
         return shapes
 
 
-def cardinal_spline(Q, c, closed=False):
-    """Cardinal spline interpolation for a sequence of values"""
-    isnp = isinstance(Q, np.ndarray)
+# def cardinal_spline(Q, c, closed=False):
+#     """Cardinal spline interpolation for a sequence of values"""
+#     isnp = isinstance(Q, np.ndarray)
 
-    if closed:
-        if isnp:
-            Q = np.vstack([Q, Q[0:1]])
-        else:
-            Q = torch.concat([Q, Q[0:1]])
-    n = len(Q)
-    D = []
-    for k in range(1, n - 1):
-        # Assuming uniform parametrisation here
-        d = (1 - c) * (Q[k + 1] - Q[k - 1])
-        D.append(d)
-    if closed:
-        d1 = dn = (1 - c) * (Q[1] - Q[-2])
-    else:
-        d1 = (1 - c) * (Q[1] - Q[0])
-        dn = (1 - c) * (Q[-1] - Q[-2])
-    D = [d1] + D + [dn]
-    P = [Q[0]]
-    for k in range(1, n):
-        p1 = Q[k - 1] + D[k - 1] / 3
-        p2 = Q[k] - D[k] / 3
-        p3 = Q[k]
-        P += [p1, p2, p3]
+#     if closed:
+#         if isnp:
+#             Q = np.vstack([Q, Q[0:1]])
+#         else:
+#             Q = torch.concat([Q, Q[0:1]])
+#     n = len(Q)
+#     D = []
+#     for k in range(1, n - 1):
+#         # Assuming uniform parametrisation here
+#         d = (1 - c) * (Q[k + 1] - Q[k - 1])
+#         D.append(d)
+#     if closed:
+#         d1 = dn = (1 - c) * (Q[1] - Q[-2])
+#     else:
+#         d1 = (1 - c) * (Q[1] - Q[0])
+#         dn = (1 - c) * (Q[-1] - Q[-2])
+#     D = [d1] + D + [dn]
+#     P = [Q[0]]
+#     for k in range(1, n):
+#         p1 = Q[k - 1] + D[k - 1] / 3
+#         p2 = Q[k] - D[k] / 3
+#         p3 = Q[k]
+#         P += [p1, p2, p3]
 
-    if closed:
-        P = P[:-1]
-    if isnp:
-        return np.vstack(P)
-    return torch.vstack(P)
+#     if closed:
+#         P = P[:-1]
+#     if isnp:
+#         return np.vstack(P)
+#     return torch.vstack(P)
 
 
 # Bot vectorization
@@ -1539,9 +1585,9 @@ def cardinal_spline(Q, c, closed=False):
 def is_compound(S):
     """Returns True if S is a compound polyline,
     a polyline is represented as a list of points, or a ndarray/tensor with as many rows as points"""
-    if type(S) != list:
+    if not isinstance(S, list):
         return False
-    if type(S) == list:
+    else:
         if not S:
             return True
         for P in S:
@@ -1657,7 +1703,7 @@ def bezier(P, t, d=0):
 
 
 def num_bezier(n_ctrl, degree=3):
-    if type(n_ctrl) == np.ndarray:
+    if isinstance(n_ctrl, np.ndarray):
         n_ctrl = len(n_ctrl)
     return int((n_ctrl - 1) / degree)
 
@@ -1710,3 +1756,39 @@ def default_device():
     else:
         # DiffVG does not work well with ARM
         return torch.device("cpu")
+
+
+##################################################
+## Keeping DiffVG class structure for simplicity
+
+
+@dataclass
+class Path:
+    points: torch.Tensor
+    num_control_points: torch.Tensor
+    is_closed: bool = False
+    stroke_width: object = 1.0
+    use_distance_approx: bool = False
+
+
+@dataclass
+class Circle:
+    center: torch.Tensor
+    radius: object
+    stroke_width: object = 1.0
+
+
+@dataclass
+class Rect:
+    p_min: torch.Tensor
+    p_max: torch.Tensor
+    stroke_width: object = 1.0
+
+
+@dataclass
+class ShapeGroup:
+    shape_ids: torch.Tensor
+    fill_color: object = None
+    stroke_color: object = None
+    use_even_odd_rule: bool = False
+    shape_to_canvas: torch.Tensor | None = None
