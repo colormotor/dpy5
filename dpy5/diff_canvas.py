@@ -964,7 +964,7 @@ class DiffCanvas:
             center = center + size
 
         prim = Circle(
-            radius=size, center=center, stroke_width=self._to(self._line_width)
+            radius=size*0.5, center=center, stroke_width=self._to(self._line_width)
         )
         self._add_primitives([prim])
 
