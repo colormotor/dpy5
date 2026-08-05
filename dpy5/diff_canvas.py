@@ -786,22 +786,24 @@ class DiffCanvas:
         w, h = size
 
         if radius is None:
-            prim = Rect(
-                p_min=p,
-                p_max=p + size,
-                stroke_width=self._to(self._line_width),
-            )
-            self._add_primitives([prim])  # NOT WORKING ON MAC
-            # pts = self._mat(
-            #     [
-            #         [x, y],
-            #         [x + w, y],
-            #         [x + w, y + h],
-            #         [x, y + h],
-            #     ]
-            # )
+            if use_gpu:
+                prim = Rect(
+                    p_min=p,
+                    p_max=p + size,
+                    stroke_width=self._to(self._line_width),
+                )
+                self._add_primitives([prim])  # NOT WORKING ON MAC
+            else:
+                pts = self._mat(
+                    [
+                        [x, y],
+                        [x + w, y],
+                        [x + w, y + h],
+                        [x, y + h],
+                    ]
+                )
 
-            # self.polyline(pts, close=True)
+                self.polyline(pts, close=True)
         else:
             r = torch.min(self._to(radius), torch.min(w, h) / 2)
             k = self._to(0.5522847498)
@@ -964,7 +966,7 @@ class DiffCanvas:
             center = center + size
 
         prim = Circle(
-            radius=size*0.5, center=center, stroke_width=self._to(self._line_width)
+            radius=size * 0.5, center=center, stroke_width=self._to(self._line_width)
         )
         self._add_primitives([prim])
 
