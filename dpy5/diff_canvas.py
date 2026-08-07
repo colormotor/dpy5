@@ -1223,9 +1223,13 @@ class DiffCanvas:
     def to_canvas(self, save_background=False):
         from py5canvas import Canvas
 
-        c = Canvas(self.width, self.height, save_background=save_background)
+        c = Canvas(
+            self.width,
+            self.height,
+            save_background=save_background,
+        )
         c.color_mode("rgb", 1.0)
-        if self._bg is not None:
+        if self._bg is not None and save_background:
             c.background(*npy(self._bg_color))
 
         def check_degree(prim, degree):
@@ -1245,7 +1249,7 @@ class DiffCanvas:
                         Cp = npy(prim.points)
                         w = prim.stroke_width
                         if w is None or is_number(w):  # Fixed width
-                            c.stroke_weight(w)
+                            c.stroke_weight(w * 2)
                             if check_degree(prim, 3):
                                 c.multibezier(Cp, close=prim.is_closed)
                             elif check_degree(prim, 1):
@@ -1273,10 +1277,10 @@ class DiffCanvas:
                                 c.circle(R[0], 8)
 
                     elif isinstance(prim, Circle):
-                        c.stroke_weight(prim.stroke_width)
+                        c.stroke_weight(prim.stroke_width * 2)
                         c.circle(npy(prim.center), npy(prim.radius))
                     elif isinstance(prim, Rect):
-                        c.stroke_weight(prim.stroke_width)
+                        c.stroke_weight(prim.stroke_width * 2)
                         size = npy(prim.p_max - prim.p_min)
                         p = pi
         return c
