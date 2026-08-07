@@ -14,5 +14,5 @@ Processing-like API for DiffVG
 
 from . import diff_canvas
 from .diff_canvas import DiffCanvas, Shape
-from .utils import CanvasOptimizer, show_animation
+from .utils import CanvasOptimizer, show_animation, perf_timer
 from . import utils

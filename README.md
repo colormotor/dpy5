@@ -1,27 +1,32 @@
 # $D\text{py}5$ - Processing-like Differentiable Vector Graphics
 
 `dpy5` provides a Processing-inspired API (e.g., `push()`, `pop()`, `fill()`, `stroke()`, `line()`, `curve()`) for building *differentiable* 2D vector scenes. Under the hood it uses [pydiffvg](https://github.com/BachiLi/diffvg) and [PyTorch](https://pytorch.org), so all parameters are tensors and gradients can flow through the rendering process. It provides an "immediate mode" API on top of DiffVG, making it easier to experiment and build geometry through the composition of differentiable operations.
-
+ 
 `dpy5` can be used standalone in Python scripts or Jupyter notebooks, but its API is almost identical to [Py5canvas](https://github.com/colormotor/py5canvas), so it can also be used alongside it to create sketches that take advantage of differentiable rasterization.
 
 ## Installation
 
+Installation should be easy within a conda environment, but installing [DiffVG]((https://github.com/BachiLi/diffvg) can be tricky depending on the platform.
+
 Prerequisites:
 
 - [Install pytorch](https://pytorch.org/get-started/locally/)
-- [Clone and install DiffVG locally](https://github.com/BachiLi/diffvg)
+- [Clone and install DiffVG locally by following the instructions](https://github.com/BachiLi/diffvg)
 
-Install locally by cloning this repository and then
+You can install through PyPi using
+
+```
+pip install dpy5
+```
+
+
+To install the most recent version locally, clone this repository and then running
 
 ```
 pip install -e .
 ```
+from the repo directory.
 
-### Intall from pyPi
-Note that this will not install diffvg and the library is new and potentially has bugs. So the PyPi package may not include the latest fixes: 
-```
-pip install dpy5
-```
 
 ## Quick Start
 
