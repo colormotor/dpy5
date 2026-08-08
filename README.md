@@ -1,8 +1,10 @@
 # $D\text{py}5$ - Processing-like Differentiable Vector Graphics
 
 `dpy5` provides a Processing-inspired API (e.g., `push()`, `pop()`, `fill()`, `stroke()`, `line()`, `curve()`) for building *differentiable* 2D vector scenes. Under the hood it uses [pydiffvg](https://github.com/BachiLi/diffvg) and [PyTorch](https://pytorch.org), so all parameters are tensors and gradients can flow through the rendering process. It provides an "immediate mode" API on top of DiffVG, making it easier to experiment and build geometry through the composition of differentiable operations.
- 
-`dpy5` can be used standalone in Python scripts or Jupyter notebooks, but its API is almost identical to [Py5canvas](https://github.com/colormotor/py5canvas), so it can also be used alongside it to create sketches that take advantage of differentiable rasterization.
+
+Internally, `dpy5` caches primitives and concatenates transformations as drawing and styling functions are called. It then builds a scene from scratch when a `render` function is called. In practice, this is slightly slower than a retained-mode approach, where primitives are explicitly stored as object instances (e.g. a `Path`, a `Circle`). However, the speed hit is negligeable with respect to rendering time or the computation of image-space losses and the immediate-mode approach results in much simpler code and an easier way to build complex geometric compositions and transformation hierarchies.
+  
+`dpy5` can be used standalone in Python scripts or Jupyter notebooks. The API is almost identical to [Py5canvas](https://github.com/colormotor/py5canvas), a Python port of Processing/P5js, so the two can be used together to create interactive sketches that take advantage of differentiable rasterization. You can convert a `dpy5.DiffCanvas` to a `py5canvas.Canvas` using the `DiffCanvas.to_canvas()` function, which then enables cleaner rendering using [Cairo](https://www.cairographics.org), easy saving to SVG or PDF, as well as copying outputs to the clipboard.
 
 ## Installation
 
