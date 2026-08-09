@@ -305,7 +305,7 @@ class DiffCanvas:
     def rotate(self, angle):
         """Rotate by `theta` radians (or degrees, depeending on the angle mode)"""
         # angle in rad, differentiable
-        angle = self._to(angle)
+        angle = self._to_radians(self._to(angle))
         c, s = torch.cos(angle), torch.sin(angle)
         M = self._mat([[c, -s, 0], [s, c, 0], [0, 0, 1]])
         self._transform = self._transform @ M
@@ -405,12 +405,12 @@ class DiffCanvas:
     def _to_radians(self, ang):
         if self._angle_mode == "radians":
             return ang
-        return np.radians(ang)
+        return (ang / 360) * np.pi * 2
 
     def _to_degrees(self, ang):
         if self._angle_mode == "degrees":
             return ang
-        return np.degrees(ang)
+        return ang * 180 * np.pi
 
     def _get_color(self, *args):
         if len(args) == 1:
@@ -1220,7 +1220,7 @@ class DiffCanvas:
     def _var_id(self, name, id):
         return f"{name}_{id}"
 
-    def to_canvas(self, save_background=False):
+    def to_canvas(self, save_background=True):
         from py5canvas import Canvas
 
         c = Canvas(
