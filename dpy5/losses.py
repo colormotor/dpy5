@@ -106,7 +106,7 @@ class CLIPVisualLoss(torch.nn.Module):
 
         self.blur_sigma = blur_sigma
         self.blur_kernel = blur_kernel
-        
+
         if clipag:
             clip_model = "CLIPAG"
         model, preprocess, tokenizer, self.input_size = load_clip_model(
@@ -337,22 +337,53 @@ def download_file_once(url, local_path):
     return local_path
 
 
-def to_batch(x, rgb, device):
+def to_batch(x, rgb=True, device=None):
+    """
+    Convert PIL / numpy / torch image to [1,3,H,W] float in [0,1].
+    Assumes batch size 1.
+    """
     if isinstance(x, Image.Image):
         if not rgb:
             x = x.convert("L")
-        x = torch.tensor(np.array(x) / 255, device=device)
-    elif isinstance(x, np.ndarray):
-        x = torch.tensor(x, device=device)
-    if rgb:
-        if len(x.shape) == 3:
-            x = x[:, :, :, np.newaxis]
-        x = x.permute((3, 2, 0, 1))  # to NCHW
-    else:
-        if len(x.shape) > 2:
-            x = torch.mean(x, axis=-1)
-        if len(x.shape) == 2:
-            x = x[np.newaxis, np.newaxis, :, :]
+        x = np.array(x)
+
+    if isinstance(x, np.ndarray):
+        x = torch.from_numpy(x)
+
+    if not torch.is_tensor(x):
+        raise TypeError(f"Unsupported input type: {type(x)}")
+
+    x = x.to(device=device)
+
+    # H,W -> H,W,1
+    if x.ndim == 2:
+        x = x.unsqueeze(-1)
+
+    # H,W,C -> 1,C,H,W
+    if x.ndim == 3:
+        if x.shape[-1] == 4:
+            x = x[..., :3]
+        if (not rgb) and x.shape[-1] > 1:
+            # Conversion like PIL
+            w = torch.tensor(299 / 1000, 587 / 1000, 114 / 1000, device=x.device)
+            x = (x.float() * w).sum(dim=-1, keepdim=True)
+            # x = x.float().mean(dim=-1, keepdim=True)
+        if rgb and x.shape[-1] == 1:
+            x = x.repeat(1, 1, 3)
+        x = x.permute(2, 0, 1).unsqueeze(0)
+
+    # C,H,W -> 1,C,H,W
+    elif x.ndim == 3 and x.shape[0] in (1, 3):
+        x = x.unsqueeze(0)
+
+    elif x.ndim != 4:
+        raise ValueError(f"Unexpected shape: {tuple(x.shape)}")
+
+    if x.shape[1] == 1:
         x = x.repeat(1, 3, 1, 1)
-    x = x.repeat(cfg.batch_size, 1, 1, 1)
+
+    x = x.float()
+    if x.max() > 1.0:
+        x = x / 255.0
+
     return x

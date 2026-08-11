@@ -429,7 +429,9 @@ class DiffCanvas:
         elif len(args) == 2:
             if not is_number(args[0]):
                 if len(args[0]) != 3:
-                    raise ValueError("Vector first argument for color needs 3 elements (RGB)")
+                    raise ValueError(
+                        "Vector first argument for color needs 3 elements (RGB)"
+                    )
                 return self._vec(*args[0], args[1])
             return self._vec(args[0], args[0], args[0], args[1])
         elif len(args) == 3:
@@ -1105,13 +1107,14 @@ class DiffCanvas:
             num_samples = 1
 
         if self._bg is not None:
-            bg = torch.as_tensor(self._bg).to(self.dtype).to(self.device)
+            bg = torch.as_tensor(self._bg, dtype=self.dtype, device=self.device)
             if len(bg.shape) == 2:
                 bg = bg[:, :, np.newaxis]
                 bg = bg.repeat(1, 1, 3)
             h, w, _ = bg.shape
         else:
             w, h = self.width, self.height
+            bg = None
 
         # Get current DiffVG groups and primitives.
         # These will be the ones just constructed with the preceding drawing calls,
@@ -1119,7 +1122,10 @@ class DiffCanvas:
         groups, primitives = self.get_scene()
         if not primitives:
             print("No primitives to render")
-            self.img = bg
+            if bg is not None:
+                self.img = bg
+            else:
+                self.img = torch.zeros((h, w, 4), dtype=self.dtype, device=self.device)
             return self.img
 
         if isinstance(renderer, str):
