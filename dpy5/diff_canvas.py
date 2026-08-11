@@ -427,6 +427,10 @@ class DiffCanvas:
             else:
                 return self._vec(args[0], args[0], args[0], 1.0)
         elif len(args) == 2:
+            if not is_number(args[0]):
+                if len(args[0]) != 3:
+                    raise ValueError("Vector first argument for color needs 3 elements (RGB)")
+                return self._vec(*args[0], args[1])
             return self._vec(args[0], args[0], args[0], args[1])
         elif len(args) == 3:
             return self._vec(args[0], args[1], args[2], 1.0)
@@ -650,7 +654,7 @@ class DiffCanvas:
         self.polyline(points, close=True)
         return self
 
-    def multibezier(self, *args, close=False):
+    def multibezier(self, *args, close=False, newpath=True):
         """
         Draw a sequence of connected cubic Bézier curves.
 
@@ -669,9 +673,11 @@ class DiffCanvas:
             points = torch.vstack([self._to(v) for v in args]).T
         else:
             raise ValueError("Wrong number of arguments")
-        self.begin_contour()
+        if newpath:
+            self.begin_contour()
         self.cur_shape._multibezier(points, close)
-        self.end_contour(close)
+        if newpath:
+            self.end_contour(close)
         return self
 
     def curve(self, *args, close=False):
@@ -1240,7 +1246,8 @@ class DiffCanvas:
         for g in groups:
             c.fill(g.fill_color)
             c.stroke(g.stroke_color)
-
+            if len(g.shape_ids) > 1:
+                c.begin_shape()
             with c.push_matrix():
                 c.apply_matrix(npy(g.shape_to_canvas))
                 for i in npy(g.shape_ids):
@@ -1249,15 +1256,34 @@ class DiffCanvas:
                         Cp = npy(prim.points)
                         w = prim.stroke_width
                         if w is None or is_number(w):  # Fixed width
-                            c.stroke_weight(w * 2)
+                            c.stroke_weight(npy(w) * 2)
                             if check_degree(prim, 3):
+                                if prim.is_closed:
+                                    Cp = np.vstack([Cp, Cp[0]])
                                 c.multibezier(Cp, close=prim.is_closed)
                             elif check_degree(prim, 1):
-                                c.polyline(Cp)
+                                c.polyline(Cp, close=prim.is_closed)
                             else:
-                                raise ValueError(
-                                    "Mixed degrees or degrees other than 1 and 3 not supported yet for canvas conversion"
-                                )
+                                c.begin_contour()
+                                if prim.is_closed:
+                                    Cp = np.vstack([Cp, Cp[0]])
+                                nctrl = npy(prim.num_control_points)
+                                j = 1
+                                c.vertex(Cp[0])  # initial point
+                                for nc in nctrl:
+                                    if nc == 2:
+                                        pts = Cp[j : j + 3]
+                                        c.bezier_vertex(*pts)
+                                        j += 3
+                                    elif nc == 0:
+                                        c.vertex(Cp[j])
+                                        j += 1
+                                    else:
+                                        raise ValueError(
+                                            "Only cubic and linear ar supported for conversion"
+                                        )
+                                c.end_contour(prim.is_closed)
+
                         else:
                             if not check_degree(prim, 3):
                                 raise ValueError(
@@ -1283,6 +1309,8 @@ class DiffCanvas:
                         c.stroke_weight(prim.stroke_width * 2)
                         size = npy(prim.p_max - prim.p_min)
                         p = pi
+            if len(g.shape_ids) > 1:
+                c.end_shape()
         return c
 
 
