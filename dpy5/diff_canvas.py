@@ -27,6 +27,8 @@ import copy
 from PIL import Image
 import math
 
+from .utils import perf_timer
+
 use_gpu = torch.cuda.is_available()
 print("Using gpu: ", use_gpu)
 
@@ -682,6 +684,23 @@ class DiffCanvas:
             self.end_contour(close)
         return self
 
+    def path(self, points, num_control_points, close=False, newpath=True):
+        """
+        Draw a sequence of connected cubic Bézier curves.
+
+        Input is a tensor array with shape =(n, 2)=
+        followed by a list specifying the number of control points for each segment (cubic 2, vertex 0)
+
+        To close the curve set the named =close= argument to =True=, e.g. =c.path(points, num_control_points, close=True)=.
+        """
+
+        if newpath:
+            self.begin_contour()
+        self.cur_shape._path(points, num_control_points, close)
+        if newpath:
+            self.end_contour(close)
+        return self
+
     def curve(self, *args, close=False):
         """
         Draw a curve (open by default) using Cardinal spline interpolation.
@@ -1053,10 +1072,11 @@ class DiffCanvas:
             return out
 
         # Convert to actual pydifgvg objects (easy cause of signature)
-        primitives = [to_pydiffvg(prim) for prim in primitives]
-        groups = [to_pydiffvg(group) for group in groups]
+        with perf_timer("build primitives", verbose=False):
+            primitives = [to_pydiffvg(prim) for prim in primitives]
+            groups = [to_pydiffvg(group) for group in groups]
 
-        pydiffvg.set_use_gpu(use_gpu)
+            pydiffvg.set_use_gpu(use_gpu)
 
         scene_args = pydiffvg.RenderFunction.serialize_scene(
             w,
@@ -1459,6 +1479,18 @@ class Shape:
             self.begin_shape()
         self.begin_contour()
         self._multibezier(points, close)
+        self.end_contour(close)
+
+    def _path(self, points, num_control_points, close=False):
+        self._ensure_mutable()
+        self._contour.append(torch.as_tensor(points))
+        self._num_ctrl += num_control_points
+
+    def path(self, points, num_control_points, close=False):
+        if not self._shape_active:
+            self.begin_shape()
+        self.begin_contour()
+        self._path(points, num_control_points, close)
         self.end_contour(close)
 
     def _curve(self, points, close):
