@@ -1315,10 +1315,9 @@ class DiffCanvas:
                                 raise ValueError(
                                     "Variable thickness is currently only supported for cubic curves"
                                 )
-                            Pw = np.column_stack([Cp, w])
+                            Pw = np.column_stack([Cp, npy(w)])
                             with c.push():
                                 c.no_stroke()
-                                c.stroke(1, 0, 0)
                                 c.fill(g.stroke_color)
                                 L, R = thick_bezier_envelope(Pw)
                                 R = R[::-1]
@@ -1326,7 +1325,7 @@ class DiffCanvas:
                                 c.multibezier(L)
                                 c.multibezier(R)
                                 c.end_shape(close=True)
-                                c.circle(R[0], 8)
+                                #c.circle(R[0], 8)
 
                     elif isinstance(prim, Circle):
                         c.stroke_weight(prim.stroke_width * 2)
