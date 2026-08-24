@@ -1262,17 +1262,18 @@ class DiffCanvas:
     def _var_id(self, name, id):
         return f"{name}_{id}"
 
-    def to_canvas(self, save_background=True):
+    def to_canvas(self, save_background=True, c=None):
         from py5canvas import Canvas
 
-        c = Canvas(
-            self.width,
-            self.height,
-            save_background=save_background,
-        )
-        c.color_mode("rgb", 1.0)
-        if self._bg is not None and save_background:
-            c.background(*npy(self._bg_color))
+        if c is None:
+            c = Canvas(
+                self.width,
+                self.height,
+                save_background=save_background,
+            )
+            c.color_mode("rgb", 1.0)
+            if self._bg is not None and save_background:
+                c.background(*npy(self._bg_color))
 
         def check_degree(prim, degree):
             ctrl = npy(prim.num_control_points)
@@ -1347,7 +1348,6 @@ class DiffCanvas:
             if len(g.shape_ids) > 1:
                 c.end_shape()
         return c
-
 
 class Shape:
     """

@@ -71,6 +71,8 @@ class CanvasOptimizer:
 
     def __init__(self, w, h, num_opt_steps, verbose=False):
         self.c = diff_canvas.DiffCanvas(w, h)
+        self.w = w
+        self.h = h
         self.optimizers = []
         self.schedulers = []
         self.running = False
