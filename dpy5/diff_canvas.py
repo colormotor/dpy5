@@ -14,6 +14,8 @@ Processing-like API for DiffVG
 Core API
 """
 
+from fontTools.ttLib.tables.S__i_l_f import pass_attrs_fsm
+
 import numbers
 import torch
 import numpy as np
@@ -26,7 +28,7 @@ import pydiffvg
 import copy
 from PIL import Image
 import math
-
+import pdb
 from .utils import perf_timer
 
 use_gpu = torch.cuda.is_available()
@@ -1038,9 +1040,12 @@ class DiffCanvas:
 
     def _build_shape(self, shape):
         primitives = shape.build(self)
-        inds = self._add_primitives(primitives)
-        # store for instancing if shape is called with same object multiple times
-        self.shape_to_inds[shape] = inds
+        if primitives:
+            inds = self._add_primitives(primitives)
+            # store for instancing if shape is called with same object multiple times
+            self.shape_to_inds[shape] = inds
+        else:
+            print("Empty shape")
 
     def line(self, *args):
         """Draws a line between two points
@@ -1066,9 +1071,14 @@ class DiffCanvas:
     ):
 
         def to_pydiffvg(obj):
-            cls = getattr(pydiffvg, type(obj).__name__)
+            name = type(obj).__name__
+            cls = getattr(pydiffvg, name)
             kwargs = {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj)}
             out = cls(**kwargs)
+            # if name == "Path":
+            #     if len(out.num_control_points) != num_bezier(out.points, out.is_closed):
+            #         pdb.set_trace()
+            #     # pdb.set_trace()
             return out
 
         # Convert to actual pydifgvg objects (easy cause of signature)
@@ -1325,7 +1335,7 @@ class DiffCanvas:
                                 c.multibezier(L)
                                 c.multibezier(R)
                                 c.end_shape(close=True)
-                                #c.circle(R[0], 8)
+                                # c.circle(R[0], 8)
 
                     elif isinstance(prim, Circle):
                         c.stroke_weight(prim.stroke_width * 2)
@@ -1466,7 +1476,8 @@ class Shape:
     def _multibezier(self, points, close):
         self._ensure_mutable()
         num_segs = num_bezier(points, close)
-        self._contour.append(torch.as_tensor(points))
+        points = torch.as_tensor(points)
+        self._contour.append(points)
         self._num_ctrl += [2] * num_segs
 
     def multibezier(self, points, close=False):
@@ -1554,6 +1565,9 @@ class Shape:
             if isinstance(ctr, tuple):
                 pts, nctrl, closed = ctr
                 pts = pts.to(dtype=c.dtype, device=c.device)
+                if closed and torch.allclose(pts[0], pts[-1]) and nctrl[-1] > 0:
+                    # User repeated endpoints for a curve segment, remove last
+                    pts = pts[:-1]
                 if pts.shape[1] > 2:
                     w = pts[:, 2].contiguous()
                     pts = pts[:, :2].contiguous()
@@ -1697,21 +1711,11 @@ def beziers_to_chain(beziers):
 
 def chain_to_beziers(chain, degree=3):
     """Convert Bezier chain to list of curve segments (4 control points each)"""
-    num = num_bezier(chain.shape[0], degree)
+    num = num_bezier(chain.shape[0], degree=degree)
     beziers = []
     for i in range(num):
         beziers.append(chain[i * degree : i * degree + degree + 1, :])
     return beziers
-
-
-def beziers_to_chain(beziers):
-    """Convert list of Bezier curve segments to a piecewise bezier chain (shares vertices)"""
-    n = len(beziers)
-    chain = []
-    for i in range(n):
-        chain.append(list(beziers[i][:-1]))
-    chain.append([beziers[-1][-1]])
-    return np.array(sum(chain, []))
 
 
 def tangent_angle(bez):
@@ -1773,12 +1777,6 @@ def bezier(P, t, d=0):
     return (P.T @ B).T
 
 
-def num_bezier(n_ctrl, degree=3):
-    if isinstance(n_ctrl, np.ndarray):
-        n_ctrl = len(n_ctrl)
-    return int((n_ctrl - 1) / degree)
-
-
 def thick_bezier_envelope(Cp, subd_thresh=50):
     """Approximate envelope of a Bezier chain with varying width
     Subdivides the segments based depending on tangent angle
@@ -1816,7 +1814,7 @@ def thick_bezier_envelope(Cp, subd_thresh=50):
 def num_bezier(n_ctrl, closed=False, degree=3):
     if not is_number(n_ctrl):
         n_ctrl = len(n_ctrl)
-    if closed:
+    if closed and n_ctrl % 3 == 0:
         n_ctrl += 1
     return int((n_ctrl - 1) / degree)
 
