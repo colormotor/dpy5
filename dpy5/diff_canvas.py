@@ -1262,7 +1262,7 @@ class DiffCanvas:
     def _var_id(self, name, id):
         return f"{name}_{id}"
 
-    def to_canvas(self, save_background=True, c=None):
+    def to_canvas(self, c=None, save_background=True):
         from py5canvas import Canvas
 
         if c is None:
@@ -1348,6 +1348,7 @@ class DiffCanvas:
             if len(g.shape_ids) > 1:
                 c.end_shape()
         return c
+
 
 class Shape:
     """
